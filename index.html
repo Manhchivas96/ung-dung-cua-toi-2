@@ -1,0 +1,1945 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bệnh Án Điện Tử YHCT</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel Standalone for JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+    <!-- html2pdf for PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        html, body { 
+            background-color: #f1f5f9; 
+            overscroll-behavior-y: none; /* Ngăn chặn triệt để tính năng vuốt xuống để làm mới (pull-to-refresh) trên điện thoại */
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Cấu hình hiển thị khi IN (Print) */
+        @media print {
+            @page { margin: 15mm; size: A4; }
+            body { background-color: #fff; }
+            .print-hidden { display: none !important; }
+            .print-show { 
+                position: static !important; 
+                width: 100% !important; 
+                opacity: 1 !important; 
+                pointer-events: auto !important;
+                left: 0 !important;
+                display: block !important;
+            }
+        }
+        /* Cấu hình văn bản hiển thị off-screen để xuất file PDF/Word */
+        .export-area {
+            position: absolute;
+            left: -9999px;
+            top: 0;
+            width: 210mm; /* A4 width */
+            background: white;
+            padding: 20mm;
+            color: black;
+            font-family: 'Times New Roman', serif;
+        }
+        /* Animation fade-in mượt mà */
+        .animate-fadeIn {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, Component } = React;
+
+        // --- ERROR BOUNDARY (KHẮC PHỤC LỖI TRẮNG MÀN HÌNH) ---
+        class ErrorBoundary extends Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error: error };
+            }
+
+            componentDidCatch(error, errorInfo) {
+                console.error("React Error Boundary caught an error:", error, errorInfo);
+            }
+
+            handleReset = () => {
+                if(window.confirm("Thao tác này sẽ xóa TOÀN BỘ bệnh án và tủ thuốc đang lưu trong máy để khôi phục ứng dụng. Bạn có chắc chắn?")) {
+                    try {
+                        localStorage.removeItem('yhct_records');
+                        localStorage.removeItem('yhct_custom_remedies');
+                    } catch(e) {}
+                    window.location.reload();
+                }
+            }
+
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+                            <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center border-t-4 border-red-500 animate-fadeIn">
+                                <svg className="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                <h2 className="text-xl font-bold text-slate-800 mb-2">Đã xảy ra lỗi hệ thống!</h2>
+                                <p className="text-sm text-slate-600 mb-6">Ứng dụng gặp sự cố (có thể do bộ nhớ đầy hoặc lỗi dữ liệu). Vui lòng thử tải lại trang. Nếu vẫn bị lỗi, hãy khôi phục cài đặt gốc.</p>
+                                <div className="space-y-3">
+                                    <button onClick={() => window.location.reload()} className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium transition">Tải lại ứng dụng</button>
+                                    <button onClick={this.handleReset} className="w-full py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 font-medium transition">Khôi phục cài đặt gốc (Xóa dữ liệu)</button>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children; 
+            }
+        }
+
+        // --- CÁC DANH MỤC THƯ VIỆN & CẤU HÌNH ---
+        const MA_BENH_PRESETS = [
+            // --- Bệnh Cơ xương khớp ---
+            { label: 'Thoái hóa cột sống cổ (M47.8)', yhhhd: 'Thoái hóa cột sống cổ', ma: 'M47.8' },
+            { label: 'Thoái hóa cột sống thắt lưng (M47.8)', yhhhd: 'Thoái hóa cột sống thắt lưng', ma: 'M47.8' },
+            { label: 'Thoát vị đĩa đệm cột sống thắt lưng (M51.2)', yhhhd: 'Thoát vị đĩa đệm cột sống thắt lưng', ma: 'M51.2' },
+            { label: 'Thoát vị đĩa đệm cột sống cổ (M50.2)', yhhhd: 'Thoát vị đĩa đệm cột sống cổ', ma: 'M50.2' },
+            { label: 'Đau thần kinh tọa (M54.3)', yhhhd: 'Đau thần kinh tọa', ma: 'M54.3' },
+            { label: 'Đau thắt lưng hông (M54.5)', yhhhd: 'Đau cột sống thắt lưng (Lumbago)', ma: 'M54.5' },
+            { label: 'Đau vai gáy / Hội chứng cổ vai gáy (M53.1)', yhhhd: 'Hội chứng cổ vai gáy', ma: 'M53.1' },
+            { label: 'Thoái hóa khớp gối (M15)', yhhhd: 'Thoái hóa đa khớp (Khớp gối)', ma: 'M15' },
+            { label: 'Thoái hóa khớp háng (M16)', yhhhd: 'Thoái hóa khớp háng', ma: 'M16' },
+            { label: 'Viêm khớp dạng thấp (M05)', yhhhd: 'Viêm khớp dạng thấp', ma: 'M05' },
+            { label: 'Viêm cột sống dính khớp (M45)', yhhhd: 'Viêm cột sống dính khớp', ma: 'M45' },
+            { label: 'Gout / Gút (M10)', yhhhd: 'Bệnh Gút (Gout)', ma: 'M10' },
+            { label: 'Loãng xương không có gãy xương bệnh lý (M81)', yhhhd: 'Loãng xương', ma: 'M81' },
+            { label: 'Loãng xương có gãy xương bệnh lý (M80)', yhhhd: 'Loãng xương có gãy xương', ma: 'M80' },
+            { label: 'Viêm quanh khớp vai (M75.0)', yhhhd: 'Viêm quanh khớp vai', ma: 'M75.0' },
+            { label: 'Hội chứng chóp xoay vai (M75.1)', yhhhd: 'Hội chứng chóp xoay', ma: 'M75.1' },
+            { label: 'Viêm lồi cầu ngoài xương cánh tay (Tennis elbow) (M77.1)', yhhhd: 'Viêm lồi cầu ngoài xương cánh tay', ma: 'M77.1' },
+            { label: 'Viêm lồi cầu trong xương cánh tay (Golfer elbow) (M77.0)', yhhhd: 'Viêm lồi cầu trong xương cánh tay', ma: 'M77.0' },
+            { label: 'Hội chứng ống cổ tay (G56.0)', yhhhd: 'Hội chứng ống cổ tay', ma: 'G56.0' },
+            { label: 'Ngón tay lò xo / Viêm bao gân gấp (M65.3)', yhhhd: 'Ngón tay lò xo (Trigger finger)', ma: 'M65.3' },
+            { label: 'Hội chứng De Quervain (Viêm gân ngón cái) (M65.4)', yhhhd: 'Hội chứng De Quervain', ma: 'M65.4' },
+            { label: 'Viêm gân Achilles (M76.6)', yhhhd: 'Viêm gân gót (Achilles)', ma: 'M76.6' },
+            { label: 'Gai xương gót / Viêm cân gan chân (M77.3)', yhhhd: 'Gai xương gót / Viêm cân gan chân', ma: 'M77.3' },
+            { label: 'Viêm khớp phản ứng (M02)', yhhhd: 'Viêm khớp phản ứng', ma: 'M02' },
+            { label: 'Bệnh lý rễ thần kinh cổ (M54.1)', yhhhd: 'Bệnh lý rễ thần kinh cổ', ma: 'M54.1' },
+            { label: 'Bệnh lý rễ thần kinh thắt lưng cùng (M54.1)', yhhhd: 'Bệnh lý rễ thần kinh thắt lưng cùng', ma: 'M54.1' },
+            
+            // --- Thần kinh & Nội khoa chung ---
+            { label: 'Liệt dây thần kinh VII ngoại biên (G51.0)', yhhhd: 'Liệt dây thần kinh VII ngoại biên do lạnh', ma: 'G51.0' },
+            { label: 'Di chứng nhồi máu não (I69.3)', yhhhd: 'Di chứng nhồi máu não', ma: 'I69.3' },
+            { label: 'Thiếu máu não / Rối loạn tuần hoàn não (I67.8)', yhhhd: 'Thiếu máu não', ma: 'I67.8' },
+            { label: 'Rối loạn tiền đình (H81.9)', yhhhd: 'Rối loạn tiền đình', ma: 'H81.9' },
+            { label: 'Tăng huyết áp vô căn (I10)', yhhhd: 'Tăng huyết áp vô căn (nguyên phát)', ma: 'I10' },
+            { label: 'Đái tháo đường typ 2 (E11)', yhhhd: 'Đái tháo đường typ 2', ma: 'E11' },
+            { label: 'Rối loạn chuyển hóa Lipid máu (E78)', yhhhd: 'Rối loạn chuyển hóa Lipid máu hỗn hợp', ma: 'E78' },
+            { label: 'Viêm loét dạ dày - tá tràng (K27)', yhhhd: 'Viêm loét dạ dày - tá tràng', ma: 'K27' },
+            { label: 'Trào ngược dạ dày thực quản - GERD (K21.9)', yhhhd: 'Trào ngược dạ dày thực quản', ma: 'K21.9' },
+            { label: 'Viêm phế quản cấp (J20)', yhhhd: 'Viêm phế quản cấp', ma: 'J20' },
+            { label: 'Viêm xoang cấp (J01)', yhhhd: 'Viêm xoang cấp tính', ma: 'J01' },
+            { label: 'Sỏi thận / Sỏi tiết niệu (N20)', yhhhd: 'Sỏi thận', ma: 'N20' },
+            { label: 'Viêm bàng quang / Viêm đường tiết niệu (N30)', yhhhd: 'Viêm bàng quang', ma: 'N30' },
+            { label: 'Rối loạn giấc ngủ / Mất ngủ (G47.0)', yhhhd: 'Mất ngủ không thực tổn', ma: 'G47.0' },
+            { label: 'Suy nhược cơ thể (R53)', yhhhd: 'Suy nhược cơ thể', ma: 'R53' },
+            
+            // --- Đa dạng mã bệnh YHHĐ ---
+            { label: 'Hen phế quản (J45)', yhhhd: 'Hen phế quản', ma: 'J45' },
+            { label: 'Viêm phổi (J18)', yhhhd: 'Viêm phổi', ma: 'J18' },
+            { label: 'Bệnh phổi tắc nghẽn mạn tính - COPD (J44.9)', yhhhd: 'Bệnh phổi tắc nghẽn mạn tính', ma: 'J44.9' },
+            { label: 'Suy tim (I50)', yhhhd: 'Suy tim', ma: 'I50' },
+            { label: 'Bệnh tim thiếu máu cục bộ mạn tính (I25)', yhhhd: 'Bệnh tim thiếu máu cục bộ', ma: 'I25' },
+            { label: 'Nhồi máu cơ tim cấp (I21)', yhhhd: 'Nhồi máu cơ tim cấp', ma: 'I21' },
+            { label: 'Viêm đại tràng mạn tính (K52.9)', yhhhd: 'Viêm đại tràng mạn tính', ma: 'K52.9' },
+            { label: 'Hội chứng ruột kích thích - IBS (K58)', yhhhd: 'Hội chứng ruột kích thích', ma: 'K58' },
+            { label: 'Viêm gan virus B mạn tính (B18.1)', yhhhd: 'Viêm gan virus B mạn', ma: 'B18.1' },
+            { label: 'Xơ gan (K74)', yhhhd: 'Xơ gan', ma: 'K74' },
+            { label: 'Trĩ nội / Trĩ ngoại (I84)', yhhhd: 'Bệnh trĩ', ma: 'I84' },
+            { label: 'Suy thận mạn tính (N18)', yhhhd: 'Suy thận mạn tính', ma: 'N18' },
+            { label: 'Viêm cầu thận mạn (N03)', yhhhd: 'Viêm cầu thận mạn', ma: 'N03' },
+            { label: 'Phì đại tiền liệt tuyến (N40)', yhhhd: 'Phì đại tuyến tiền liệt', ma: 'N40' },
+            { label: 'Cường giáp / Basedow (E05)', yhhhd: 'Cường giáp trạng', ma: 'E05' },
+            { label: 'Suy giáp (E03)', yhhhd: 'Suy giáp trạng', ma: 'E03' },
+            { label: 'Mề đay (L50)', yhhhd: 'Mề đay', ma: 'L50' },
+            { label: 'Viêm da cơ địa (L20)', yhhhd: 'Viêm da cơ địa', ma: 'L20' },
+            { label: 'Vảy nến (L40)', yhhhd: 'Vảy nến', ma: 'L40' },
+            { label: 'Trầm cảm (F32)', yhhhd: 'Rối loạn trầm cảm', ma: 'F32' },
+            { label: 'Rối loạn lo âu (F41)', yhhhd: 'Rối loạn lo âu', ma: 'F41' },
+            { label: 'Thiếu máu do thiếu sắt (D50)', yhhhd: 'Thiếu máu thiếu sắt', ma: 'D50' }
+        ];
+
+        const THUOC_ARRAY = [
+            // --- Giảm đau, Kháng viêm (NSAID), Hạ sốt ---
+            { label: 'Paracetamol 500mg (Giảm đau, Hạ sốt)', name: 'Paracetamol 500mg', dose: '01 viên/lần, uống khi đau/sốt (không quá 4 viên/ngày).' },
+            { label: 'Paracetamol 1g/100ml (Perfalgan - Truyền TM)', name: 'Paracetamol 1g/100ml', dose: '01 chai/lần, truyền tĩnh mạch XXX giọt/phút khi sốt cao/đau nhiều.' },
+            { label: 'Tramadol 37.5mg + Paracetamol 325mg (Ultracet)', name: 'Ultracet', dose: '01-02 viên/ngày, uống sau ăn.' },
+            { label: 'Diclofenac 50mg (NSAID)', name: 'Diclofenac 50mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn no.' },
+            { label: 'Diclofenac 75mg/3ml (Tiêm bắp)', name: 'Diclofenac 75mg/3ml', dose: '01 ống/ngày, tiêm bắp sâu.' },
+            { label: 'Ibuprofen 400mg (NSAID)', name: 'Ibuprofen 400mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn no.' },
+            { label: 'Piroxicam 20mg (NSAID)', name: 'Piroxicam 20mg', dose: '01 viên/ngày, uống sau ăn no.' },
+            { label: 'Meloxicam 7.5mg (NSAID chọn lọc)', name: 'Meloxicam 7.5mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn no.' },
+            { label: 'Meloxicam 15mg (NSAID chọn lọc)', name: 'Meloxicam 15mg', dose: '01 viên/ngày, uống sau ăn no.' },
+            { label: 'Meloxicam 15mg/1.5ml (Tiêm bắp)', name: 'Meloxicam 15mg/1.5ml', dose: '01 ống/ngày, tiêm bắp sâu.' },
+            { label: 'Celecoxib 100mg (NSAID chọn lọc)', name: 'Celecoxib 100mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn no.' },
+            { label: 'Celecoxib 200mg (NSAID chọn lọc)', name: 'Celecoxib 200mg', dose: '01 viên/ngày, uống sau ăn no.' },
+            { label: 'Etoricoxib 60mg (Arcoxia - NSAID chọn lọc)', name: 'Etoricoxib 60mg', dose: '01 viên/ngày, uống sau ăn no.' },
+            { label: 'Etoricoxib 90mg (Arcoxia - NSAID chọn lọc)', name: 'Etoricoxib 90mg', dose: '01 viên/ngày, uống sau ăn no.' },
+            { label: 'Etoricoxib 120mg (Arcoxia - NSAID chọn lọc)', name: 'Etoricoxib 120mg', dose: '01 viên/ngày, uống sau ăn no (tối đa 8 ngày).' },
+
+            // --- Gout ---
+            { label: 'Colchicin 1mg (Gout cấp)', name: 'Colchicin 1mg', dose: '01 viên/ngày, uống sau ăn tối (Theo phác đồ Gout cấp).' },
+            { label: 'Allopurinol 300mg (Giảm Acid Uric)', name: 'Allopurinol 300mg', dose: '01 viên/ngày, uống sau ăn.' },
+            { label: 'Febuxostat 40mg (Giảm Acid Uric)', name: 'Febuxostat 40mg', dose: '01 viên/ngày, uống sau ăn.' },
+            { label: 'Febuxostat 80mg (Giảm Acid Uric)', name: 'Febuxostat 80mg', dose: '01 viên/ngày, uống sau ăn.' },
+
+            // --- Giãn cơ ---
+            { label: 'Eperisone 50mg (Giãn cơ)', name: 'Eperisone 50mg', dose: '03 viên/ngày, chia 3 lần uống sau ăn.' },
+            { label: 'Thiocolchicoside 4mg (Coltramyl - Giãn cơ)', name: 'Thiocolchicoside 4mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Tolperisone 50mg (Mydocalm - Giãn cơ)', name: 'Tolperisone 50mg', dose: '03 viên/ngày, chia 3 lần uống.' },
+            { label: 'Tolperisone 150mg (Mydocalm - Giãn cơ)', name: 'Tolperisone 150mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Mephenesin 250mg (Decontractyl - Giãn cơ tác dụng nhanh)', name: 'Mephenesin 250mg', dose: '04-06 viên/ngày, chia 2-3 lần uống.' },
+            { label: 'Baclofen 10mg (Lioresal - Giãn cơ co cứng)', name: 'Baclofen 10mg', dose: '01-03 viên/ngày (Theo y lệnh Bác sĩ).' },
+
+            // --- Thần kinh ngoại biên, Bổ thần kinh ---
+            { label: 'Milgamma N (Thần kinh, Vitamin 3B)', name: 'Milgamma N (Viên)', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Milgamma N 2ml (Ống tiêm bắp - Vitamin 3B)', name: 'Milgamma N 2ml (Ống)', dose: '01 ống/ngày, tiêm bắp sâu.' },
+            { label: 'Bconzym (Vitamin nhóm B)', name: 'Bconzym', dose: '02-04 viên/ngày, chia 2 lần uống.' },
+            { label: 'Bconzym (Tiêm bắp/TMC)', name: 'Bconzym (Ống)', dose: '01-02 ống/ngày, tiêm bắp hoặc TMC.' },
+            { label: 'Nucleo CMP Forte (Phục hồi TK)', name: 'Nucleo CMP Forte', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Nucleo CMP Forte (Ống tiêm bắp)', name: 'Nucleo CMP Forte (Ống)', dose: '01 ống/ngày, tiêm bắp sâu.' },
+            { label: 'Gabapentin 300mg (Giảm đau TK)', name: 'Gabapentin 300mg', dose: '01-03 viên/ngày (khởi liều 300mg/ngày, tăng dần), uống tối.' },
+            { label: 'Pregabalin 75mg (Giảm đau TK)', name: 'Pregabalin 75mg', dose: '01-02 viên/ngày, uống tối.' },
+            { label: 'Pregabalin 150mg (Giảm đau TK)', name: 'Pregabalin 150mg', dose: '01 viên/ngày, uống tối.' },
+
+            // --- Bổ não, Tiền đình, Chóng mặt ---
+            { label: 'Betahistin 16mg (Tiền đình, Chóng mặt)', name: 'Betahistin 16mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn.' },
+            { label: 'Betahistin 24mg (Tiền đình, Chóng mặt)', name: 'Betahistin 24mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn.' },
+            { label: 'Cinnarizin 25mg (Tiền đình)', name: 'Cinnarizin 25mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn.' },
+            { label: 'Flunarizin 5mg (Đau đầu nửa đầu, Tiền đình)', name: 'Flunarizin 5mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Acetyl-DL-leucine 500mg (Tanganil - Chóng mặt)', name: 'Acetyl-DL-leucine 500mg', dose: '03-04 viên/ngày, chia 2-3 lần.' },
+            { label: 'Citicoline 500mg (Bổ não, Phục hồi sau TB)', name: 'Citicoline 500mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Citicoline 1000mg/4ml (Tiêm/Truyền)', name: 'Citicoline 1000mg/4ml', dose: '01 ống/ngày, tiêm/truyền tĩnh mạch.' },
+            { label: 'Vinpocetin 5mg (Tăng tuần hoàn não)', name: 'Vinpocetin 5mg', dose: '03 viên/ngày, chia 3 lần uống.' },
+            { label: 'Vinpocetin 10mg/2ml (Cavinton tiêm - Tuần hoàn não)', name: 'Vinpocetin 10mg/2ml (Ống)', dose: '01-02 ống/ngày, pha truyền tĩnh mạch.' },
+            { label: 'Cerebrolysin 10ml (Dinh dưỡng TK, TBMMN)', name: 'Cerebrolysin 10ml', dose: '01 ống/ngày, tiêm/truyền tĩnh mạch (Theo y lệnh).' },
+            { label: 'Ginkgo Biloba 80mg (Tuần hoàn não)', name: 'Ginkgo Biloba 80mg', dose: '02 viên/ngày, chia 2 lần.' },
+            { label: 'Ginkgo Biloba 120mg (Tuần hoàn não)', name: 'Ginkgo Biloba 120mg', dose: '01-02 viên/ngày, uống sau ăn.' },
+            { label: 'Piracetam 800mg (Bổ não)', name: 'Piracetam 800mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Piracetam 1g/5ml (Tiêm/Truyền)', name: 'Piracetam 1g/5ml', dose: '02-04 ống/ngày, tiêm/truyền tĩnh mạch.' },
+            { label: 'Bidilucil 500mg (Meclofenoxat - Phục hồi não, TBMMN)', name: 'Bidilucil 500mg (Lọ)', dose: '01-03 lọ/ngày, tiêm bắp sâu hoặc tiêm tĩnh mạch (Theo y lệnh).' },
+            { label: 'Bidilucil 250mg (Meclofenoxat - Bổ não)', name: 'Bidilucil 250mg (Viên)', dose: '02 viên/ngày, chia 2 lần uống.' },
+
+            // --- Chống rung giật cơ, Động kinh, Parkinson ---
+            { label: 'Levetiracetam 500mg (Chống co giật)', name: 'Levetiracetam 500mg', dose: '02 viên/ngày, chia 2 lần.' },
+            { label: 'Clonazepam 2mg (Rung giật cơ, Co giật)', name: 'Clonazepam 2mg', dose: '1/2 - 01 viên/ngày (Theo y lệnh bs).' },
+            { label: 'Trihexyphenidyl 2mg (Artane - Parkinson, run tay chân)', name: 'Trihexyphenidyl 2mg', dose: '01-02 viên/ngày, chia 1-2 lần.' },
+
+            // --- Huyết áp ---
+            { label: 'Amlodipin 5mg (Huyết áp - Chẹn Canxi)', name: 'Amlodipin 5mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Amlodipin 10mg (Huyết áp - Chẹn Canxi)', name: 'Amlodipin 10mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Nifedipin 30mg (Adalat LA - Huyết áp)', name: 'Nifedipin 30mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Nifedipin 20mg (Retard - Huyết áp)', name: 'Nifedipin 20mg', dose: '02 viên/ngày, chia 2 lần.' },
+            { label: 'Nifedipin 10mg (Hạ HA nhanh/Ngậm dưới lưỡi)', name: 'Nifedipin 10mg', dose: '01 viên ngậm dưới lưỡi khi HA tăng cấp cứu.' },
+            { label: 'Losartan 50mg (Huyết áp - Chẹn thụ thể)', name: 'Losartan 50mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Losartan 100mg (Huyết áp - Chẹn thụ thể)', name: 'Losartan 100mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Telmisartan 40mg (Huyết áp - Chẹn thụ thể)', name: 'Telmisartan 40mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Telmisartan 80mg (Huyết áp - Chẹn thụ thể)', name: 'Telmisartan 80mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Valsartan 80mg (Huyết áp - Chẹn thụ thể)', name: 'Valsartan 80mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Perindopril 4mg (Huyết áp - Ức chế men chuyển)', name: 'Perindopril 4mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Perindopril 5mg (Coversyl - Huyết áp)', name: 'Perindopril 5mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Enalapril 5mg (Huyết áp - Ức chế men chuyển)', name: 'Enalapril 5mg', dose: '01-02 viên/ngày.' },
+            { label: 'Bisoprolol 2.5mg (Huyết áp, Nhịp tim - Chẹn Beta)', name: 'Bisoprolol 2.5mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Bisoprolol 5mg (Huyết áp, Nhịp tim - Chẹn Beta)', name: 'Bisoprolol 5mg', dose: '01/2 - 01 viên/ngày, uống sáng.' },
+            { label: 'Nebivolol 5mg (Nebilet - Huyết áp, Nhịp tim)', name: 'Nebivolol 5mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Captopril 25mg (Huyết áp - Ức chế men chuyển)', name: 'Captopril 25mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Felodipin 5mg (Plendil - Huyết áp)', name: 'Felodipin 5mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Irbesartan 150mg (Aprovel - Huyết áp)', name: 'Irbesartan 150mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Methyldopa 250mg (Dopegyt - HA thai kỳ/Kháng trị)', name: 'Methyldopa 250mg', dose: '02-04 viên/ngày, chia 2 lần uống.' },
+
+            // --- Lợi tiểu ---
+            { label: 'Furosemid 40mg (Lợi tiểu quai)', name: 'Furosemid 40mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Furosemid 20mg/2ml (Ống tiêm - Lợi tiểu quai)', name: 'Furosemid 20mg/2ml', dose: '01 ống/ngày, tiêm TM chậm hoặc TB.' },
+            { label: 'Spironolactone 25mg (Verospiron - Lợi tiểu tiết kiệm Kali)', name: 'Spironolactone 25mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Spironolactone 50mg (Verospiron - Lợi tiểu tiết kiệm Kali)', name: 'Spironolactone 50mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Hydrochlorothiazide 25mg (Hypothiazid - Lợi tiểu)', name: 'Hydrochlorothiazide 25mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Indapamide 1.5mg (Natrilix SR - Lợi tiểu, Hạ HA)', name: 'Indapamide 1.5mg SR', dose: '01 viên/ngày, uống sáng.' },
+
+            // --- Giãn mạch, Suy tim, Đau thắt ngực ---
+            { label: 'Nitroglycerin 2.6mg (Giãn mạch vành, Đau thắt ngực)', name: 'Nitroglycerin 2.6mg', dose: '01-02 viên/ngày, chia 2 lần (Không nhai).' },
+            { label: 'Isosorbide mononitrate 60mg (Imdur - Đau thắt ngực)', name: 'Isosorbide 60mg (Imdur)', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Trimetazidine 20mg (Vastarel - Chống thiếu máu cục bộ)', name: 'Trimetazidine 20mg', dose: '03 viên/ngày, chia 3 lần uống.' },
+            { label: 'Trimetazidine MR 35mg (Vastarel MR - Chống thiếu máu cục bộ)', name: 'Trimetazidine MR 35mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Ivabradine 5mg (Procoralan - Giảm nhịp tim)', name: 'Ivabradine 5mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+            { label: 'Cilostazol 50mg (Pletaal - Giãn mạch ngoại vi, khập khiễng)', name: 'Cilostazol 50mg', dose: '02 viên/ngày, chia 2 lần uống.' },
+
+            // --- Tiểu đường ---
+            { label: 'Metformin 500mg (Tiểu đường)', name: 'Metformin 500mg', dose: '02 viên/ngày, chia 2 lần uống cùng bữa ăn.' },
+            { label: 'Metformin 850mg (Tiểu đường)', name: 'Metformin 850mg', dose: '02 viên/ngày, chia 2 lần uống cùng bữa ăn.' },
+            { label: 'Metformin 1000mg (Tiểu đường)', name: 'Metformin 1000mg', dose: '01-02 viên/ngày, uống cùng bữa ăn.' },
+            { label: 'Gliclazide 30mg (Diamicron MR - Tiểu đường)', name: 'Gliclazide 30mg MR', dose: '01-02 viên/ngày, uống sáng.' },
+            { label: 'Gliclazide 60mg (Diamicron MR - Tiểu đường)', name: 'Gliclazide 60mg MR', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Glimepiride 2mg (Amaryl - Tiểu đường)', name: 'Glimepiride 2mg', dose: '01 viên/ngày, uống trước ăn sáng.' },
+            { label: 'Glimepiride 4mg (Amaryl - Tiểu đường)', name: 'Glimepiride 4mg', dose: '01 viên/ngày, uống trước ăn sáng.' },
+            { label: 'Sitagliptin 50mg (Januvia - Tiểu đường)', name: 'Sitagliptin 50mg', dose: '01 viên/ngày.' },
+            { label: 'Sitagliptin 100mg (Januvia - Tiểu đường)', name: 'Sitagliptin 100mg', dose: '01 viên/ngày.' },
+            { label: 'Dapagliflozin 10mg (Forxiga - Tiểu đường)', name: 'Dapagliflozin 10mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Empagliflozin 10mg (Jardiance - Tiểu đường)', name: 'Empagliflozin 10mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Empagliflozin 25mg (Jardiance - Tiểu đường)', name: 'Empagliflozin 25mg', dose: '01 viên/ngày, uống sáng.' },
+            { label: 'Insulin Mixtard 30 (Tiêm dưới da)', name: 'Insulin Mixtard 30', dose: 'Tiêm dưới da trước ăn sáng và chiều (Liều theo y lệnh).' },
+            { label: 'Insulin Glargine (Lantus - Tiêm dưới da)', name: 'Insulin Lantus', dose: 'Tiêm dưới da 1 lần/ngày (Liều theo y lệnh).' },
+
+            // --- Mỡ máu, Rối loạn Cholesterol ---
+            { label: 'Atorvastatin 10mg (Mỡ máu)', name: 'Atorvastatin 10mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Atorvastatin 20mg (Mỡ máu)', name: 'Atorvastatin 20mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Atorvastatin 40mg (Mỡ máu)', name: 'Atorvastatin 40mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Rosuvastatin 10mg (Mỡ máu)', name: 'Rosuvastatin 10mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Rosuvastatin 20mg (Mỡ máu)', name: 'Rosuvastatin 20mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Simvastatin 10mg (Mỡ máu)', name: 'Simvastatin 10mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Simvastatin 20mg (Mỡ máu)', name: 'Simvastatin 20mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Lovastatin 20mg (Mỡ máu, Cholesterol)', name: 'Lovastatin 20mg', dose: '01 viên/ngày, uống tối cùng bữa ăn.' },
+            { label: 'Pravastatin 20mg (Mỡ máu, ít tác dụng phụ cơ)', name: 'Pravastatin 20mg', dose: '01 viên/ngày, uống tối.' },
+            { label: 'Gemfibrozil 300mg (Giảm Triglycerid)', name: 'Gemfibrozil 300mg', dose: '02 viên/ngày, uống trước ăn sáng và tối 30 phút.' },
+            { label: 'Fenofibrat 145mg (Mỡ máu, Triglycerid)', name: 'Fenofibrat 145mg', dose: '01 viên/ngày, uống sau ăn chính.'},
+            { label: 'Fenofibrat 200mg (Mỡ máu, Triglycerid)', name: 'Fenofibrat 200mg', dose: '01 viên/ngày, uống sau ăn chính.'},
+            { label: 'Fenofibrat 300mg (Mỡ máu, Triglycerid)', name: 'Fenofibrat 300mg', dose: '01 viên/ngày, uống sau ăn chính.'},
+            { label: 'Ezetimibe 10mg (Ức chế hấp thu Cholesterol)', name: 'Ezetimibe 10mg', dose: '01 viên/ngày.' },
+
+            // --- Viêm khớp dạng thấp (RA) ---
+            { label: 'Methotrexate 2.5mg (Thuốc cơ bản VKDT)', name: 'Methotrexate 2.5mg', dose: '03-04 viên/tuần, uống MỘT LẦN duy nhất trong tuần.' },
+            { label: 'Sulfasalazine 500mg (VKDT, Viêm cột sống)', name: 'Sulfasalazine 500mg', dose: '02-04 viên/ngày, chia 2 lần.' },
+            { label: 'Hydroxychloroquine 200mg (Plaquenil - VKDT, Lupus)', name: 'Hydroxychloroquine 200mg', dose: '01-02 viên/ngày.' },
+
+            // --- Loãng xương, Chống hủy xương, Canxi ---
+            { label: 'Alendronate 70mg (Fosamax - Chống hủy xương)', name: 'Alendronate 70mg', dose: '01 viên/tuần (Uống sáng sớm lúc đói, đứng/ngồi thẳng 30p sau uống).' },
+            { label: 'Ibandronate 150mg (Chống hủy xương)', name: 'Ibandronate 150mg', dose: '01 viên/tháng (Uống sáng lúc đói).' },
+            { label: 'Calcitriol 0.25mcg (Vitamin D hoạt tính)', name: 'Calcitriol 0.25mcg', dose: '01-02 viên/ngày.' },
+            { label: 'Canxi D3 (Bổ bổ sung Canxi)', name: 'Canxi D3', dose: '01-02 viên/ngày, uống sáng/trưa.' },
+
+            // --- Dạ dày (Giảm tiết Acid PPI) ---
+            { label: 'Omeprazole 20mg (Dạ dày PPI)', name: 'Omeprazole 20mg', dose: '01-02 viên/ngày, uống trước ăn 30p.' },
+            { label: 'Omeprazole 40mg (Lọ tiêm - Dạ dày PPI)', name: 'Omeprazole 40mg (Lọ)', dose: '01 lọ/ngày, tiêm tĩnh mạch chậm.' },
+            { label: 'Esomeprazole 20mg (Nexium - Dạ dày PPI)', name: 'Esomeprazole 20mg', dose: '01 viên/ngày, uống trước ăn sáng 30p.' },
+            { label: 'Esomeprazole 40mg (Nexium - Dạ dày PPI)', name: 'Esomeprazole 40mg', dose: '01 viên/ngày, uống trước ăn sáng 30p.' },
+            { label: 'Esomeprazole 40mg (Lọ tiêm - Dạ dày PPI)', name: 'Esomeprazole 40mg (Lọ)', dose: '01 lọ/ngày, tiêm tĩnh mạch chậm.' },
+            { label: 'Pantoprazole 40mg (Dạ dày PPI)', name: 'Pantoprazole 40mg', dose: '01 viên/ngày, uống trước ăn sáng 30p.' },
+            { label: 'Pantoprazole 40mg (Lọ tiêm - Dạ dày PPI)', name: 'Pantoprazole 40mg (Lọ)', dose: '01 lọ/ngày, tiêm tĩnh mạch chậm.' },
+            { label: 'Rabeprazole 20mg (Dạ dày PPI)', name: 'Rabeprazole 20mg', dose: '01 viên/ngày, uống trước ăn sáng 30p.' },
+            { label: 'Phosphalugel (Gói - Dạ dày, Trung hòa acid)', name: 'Phosphalugel (Gói)', dose: '01-02 gói/lần khi đau hoặc trước ăn.' },
+
+            // --- Khớp (Khác) ---
+            { label: 'Diacerein 50mg (Chống thoái hóa khớp chậm)', name: 'Diacerein 50mg', dose: '02 viên/ngày, chia 2 lần uống sau ăn.' },
+            { label: 'Glucosamin 1500mg (Bổ khớp)', name: 'Glucosamin 1500mg', dose: '01 viên/ngày, uống sau ăn.' },
+
+            // --- An thần, Gây ngủ ---
+            { label: 'Diazepam 5mg (An thần, chống co giật)', name: 'Diazepam 5mg', dose: '01 viên/ngày, uống tối trước khi ngủ.' },
+            { label: 'Bromazepam 6mg (Lexomil - An thần, giảm âu lo)', name: 'Bromazepam 6mg', dose: '1/4 - 1/2 viên/ngày, uống tối.' },
+            { label: 'Rotunda 30mg (Thảo dược an thần)', name: 'Rotunda 30mg', dose: '01-02 viên/ngày, uống tối trước ngủ 30p.' },
+            { label: 'Melatonin 3mg (Điều hòa giấc ngủ)', name: 'Melatonin 3mg', dose: '01 viên/ngày, uống tối.' },
+
+            // --- Chống sốc, Kháng viêm Corticoid, Cấp cứu ---
+            { label: 'Adrenalin 1mg/1ml (Chống sốc/Choáng)', name: 'Adrenalin 1mg/1ml', dose: 'Tiêm bắp ngay lập tức theo phác đồ chống sốc phản vệ.' },
+            { label: 'Dimedrol 50mg (Chống dị ứng H1)', name: 'Dimedrol 50mg', dose: '01 ống tiêm bắp khi dị ứng/choáng.' },
+            { label: 'Methylprednisolon 4mg (Medrol - Corticoid)', name: 'Methylprednisolon 4mg', dose: '01-04 viên/ngày, uống sáng sau ăn.' },
+            { label: 'Methylprednisolon 16mg (Medrol - Corticoid)', name: 'Methylprednisolon 16mg', dose: '01-02 viên/ngày, uống sáng sau ăn.' },
+            { label: 'Methylprednisolon 40mg (Lọ tiêm - Corticoid)', name: 'Methylprednisolon 40mg (Lọ)', dose: '01 lọ/ngày, tiêm tĩnh mạch chậm.' },
+            { label: 'Depo-Medrol 40mg/1ml (Tiêm khớp / Tiêm bắp)', name: 'Depo-Medrol 40mg/1ml', dose: '01 lọ/lần, tiêm nội khớp hoặc tiêm bắp sâu (Theo y lệnh Bác sĩ chuyên khoa).' },
+            { label: 'Diprospan 1ml (Tiêm khớp / Tiêm bắp)', name: 'Diprospan 1ml', dose: '01 ống/lần, tiêm nội khớp hoặc tiêm bắp sâu (Theo y lệnh Bác sĩ chuyên khoa).' },
+            { label: 'Triamcinolon 4mg (Viên uống - Corticoid)', name: 'Triamcinolon 4mg', dose: '01-04 viên/ngày, uống sáng sau ăn.' },
+            { label: 'Triamcinolone acetonide 80mg/2ml (K-Cort - Tiêm khớp)', name: 'Triamcinolone 80mg/2ml', dose: '01 lọ/lần, tiêm nội khớp (Theo y lệnh Bác sĩ chuyên khoa).' }
+        ];
+
+        const CLS_PRESETS = [
+            'Tổng phân tích tế bào máu ngoại vi', 'Sinh hóa máu (Glucose, Ure, Creatinin, AST, ALT, Cholesterol...)', 'Điện giải đồ (Na+, K+, Cl-)',
+            'Tổng phân tích nước tiểu', 'Siêu âm ổ bụng tổng quát', 'Siêu âm Doppler tim', 'Siêu âm tuyến giáp', 'Điện tâm đồ (ECG)',
+            'X-Quang ngực thẳng', 'X-Quang cột sống cổ (Thẳng/Nghiêng)', 'X-Quang cột sống thắt lưng (Thẳng/Nghiêng)', 'X-Quang khớp gối (Thẳng/Nghiêng)',
+            'MRI cột sống cổ', 'MRI cột sống thắt lưng', 'MRI sọ não', 'Nội soi thực quản - dạ dày - tá tràng', 'Đo mật độ xương (DEXA)'
+        ];
+
+        const BENH_DANH_YHCT_PRESETS = [
+            // --- Cơ xương khớp (Tý Chứng & Hội chứng liên quan) ---
+            { label: 'Chứng Tý (Đau nhức xương khớp chung)' },
+            { label: 'Phong tý / Hành tý (Đau khớp di chuyển nhiều nơi)' },
+            { label: 'Hàn tý / Thống tý (Đau cố định, lạnh đau tăng)' },
+            { label: 'Thấp tý / Trước tý (Đau nặng nề, tê bì tay chân)' },
+            { label: 'Nhiệt tý (Khớp sưng nóng đỏ đau)' },
+            { label: 'Yêu thống (Đau thắt lưng)' },
+            { label: 'Yêu cước thống (Đau lưng lan xuống chân / Đau TK tọa)' },
+            { label: 'Tọa cốt phong (Đau thần kinh tọa)' },
+            { label: 'Hạng cường (Đau mỏi, cứng cổ vai gáy)' },
+            { label: 'Lạc chẩm (Vẹo cổ cấp / Đau vai gáy cấp)' },
+            { label: 'Kiên tý / Kiên ngưng chứng (Viêm quanh khớp vai / Đau vai)' },
+            { label: 'Thủ ma mộc (Hội chứng ống cổ tay / Tê tay)' },
+            { label: 'Trửu tý (Đau khuỷu tay / Viêm lồi cầu)' },
+            { label: 'Túc căn thống (Đau gót chân / Gai gót chân)' },
+            { label: 'Hạc tất phong (Tràn dịch khớp gối / Viêm khớp gối sưng to)' },
+            { label: 'Tất thống (Đau khớp gối)' },
+            { label: 'Lịch tiết phong (Viêm khớp dạng thấp / Viêm đa khớp)' },
+            { label: 'Bối tích thống (Đau cột sống lưng)' },
+            { label: 'Cốt tý (Thoái hóa xương khớp / Gai xương)' },
+            { label: 'Cốt nuy (Loãng xương / Xương yếu dễ gãy)' },
+            { label: 'Thống phong (Bệnh Gout)' },
+            { label: 'Nuy chứng (Teo cơ, liệt nhược)' },
+            
+            // --- Thần kinh - Tâm thần ---
+            { label: 'Thất miên (Mất ngủ)' },
+            { label: 'Kiện vong (Suy giảm trí nhớ)' },
+            { label: 'Đầu thống (Đau đầu)' },
+            { label: 'Huyễn vựng (Chóng mặt / Rối loạn tiền đình)' },
+            { label: 'Trúng phong (Tai biến mạch máu não)' },
+            { label: 'Khẩu nhãn oa tà (Liệt dây thần kinh VII ngoại biên)' },
+            { label: 'Tạng táo (Rối loạn thần kinh thực vật / Trầm cảm)' },
+            
+            // --- Hô hấp ---
+            { label: 'Khái thấu (Ho)' },
+            { label: 'Háo suyễn (Hen phế quản)' },
+            { label: 'Cảm mạo phong hàn (Cảm lạnh)' },
+            { label: 'Cảm mạo phong nhiệt (Cảm sốt)' },
+            { label: 'Tỵ uyên (Viêm xoang / Viêm mũi dị ứng)' },
+            
+            // --- Tiêu hóa ---
+            { label: 'Vị quản thống (Viêm loét dạ dày - tá tràng)' },
+            { label: 'Tiết tả (Tiêu chảy / Viêm đại tràng)' },
+            { label: 'Tiện bí (Táo bón)' },
+            { label: 'Ẩu thổ (Buồn nôn / Nôn)' },
+            { label: 'Ách nghịch (Nấc cụt)' },
+            { label: 'Trĩ sang (Bệnh trĩ)' },
+            
+            // --- Tim mạch - Chuyển hóa ---
+            { label: 'Tâm quý (Hồi hộp / Đánh trống ngực)' },
+            { label: 'Hung tý (Đau thắt ngực / Thiếu máu cơ tim)' },
+            { label: 'Tiêu khát (Đái tháo đường)' },
+            { label: 'Đàm ẩm (Rối loạn chuyển hóa mỡ máu)' },
+            
+            // --- Sinh dục - Tiết niệu - Toàn thân ---
+            { label: 'Thạch lâm (Sỏi thận / Sỏi tiết niệu)' },
+            { label: 'Cao lâm (Viêm đường tiết niệu / Đái đục)' },
+            { label: 'Dương nuy (Rối loạn cương dương)' },
+            { label: 'Thống kinh (Đau bụng kinh)' },
+            { label: 'Hư lao (Suy nhược cơ thể)' },
+            { label: 'Đạo hãn (Ra mồ hôi trộm)' },
+            
+            // --- Đa dạng bệnh danh YHCT ---
+            { label: 'Điên cuồng (Tâm thần phân liệt / Rối loạn hưng trầm cảm)' },
+            { label: 'Kinh phong (Động kinh / Co giật)' },
+            { label: 'Phế ung (Áp xe phổi)' },
+            { label: 'Thất âm (Khàn tiếng / Mất giọng)' },
+            { label: 'Tràng ung (Viêm ruột thừa)' },
+            { label: 'Lỵ tật (Kiết lỵ / Tiêu chảy nhiễm khuẩn)' },
+            { label: 'Cổ trướng (Báng bụng / Xơ gan cổ trướng)' },
+            { label: 'Hoàng đản (Vàng da / Viêm gan / Tắc mật)' },
+            { label: 'Huyết chứng (Khạc huyết, Nục huyết, Tiện huyết...)' },
+            { label: 'Nội thương phát nhiệt (Sốt kéo dài do hư tổn nội tạng)' },
+            { label: 'Băng lậu (Rong kinh / Rong huyết)' },
+            { label: 'Đới hạ (Viêm nhiễm phụ khoa / Khí hư)' },
+            { label: 'Nhũ ung (Viêm tắc tia sữa / Áp xe vú)' },
+            { label: 'Thủy thũng (Phù thũng do suy thận, suy tim)' },
+            { label: 'Đan độc (Viêm quầng / Nhiễm trùng da)' },
+            { label: 'Nga chưởng phong (Á sừng / Tổ đỉa tay chân)' },
+            { label: 'Bạch điến phong (Bạch biến)' },
+            { label: 'Thấp chẩn (Chàm / Eczema)' },
+            { label: 'Phong chẩn khối (Mề đay / Dị ứng)' },
+            { label: 'Xà xuyên sang (Zona thần kinh)' }
+        ];
+
+        const BAI_THUOC_CO_PHUONG = [
+            { label: '1. Độc hoạt tang ký sinh thang (Can thận hư, phong hàn thấp tý)', name: '1. Độc hoạt tang ký sinh thang', theBenh: 'Can thận hư, phong hàn thấp tý (Đau thần kinh tọa, thoái hóa)', phapTri: 'Khu phong, tán hàn, trừ thấp, bổ can thận', congThuc: 'Độc hoạt 12g, Tang ký sinh 16g, Đỗ trọng 12g, Ngưu tất 12g, Tế tân 4g, Tần giao 12g, Phòng phong 12g, Phục linh 12g, Quế tâm 4g, Xuyên khung 8g, Đương quy 12g, Bạch thược 12g, Cam thảo 4g, Đảng sâm 12g, Sinh địa 12g. Sắc uống ngày 1 thang.', thuThuat: 'Điện châm, Cứu ngải, Xoa bóp bấm huyệt vùng lưng, thắt lưng, dọc thần kinh tọa (Thận du, Đại trường du, Trật biên, Hoàn khiêu, Ân môn, Ủy trung, Dương lăng tuyền, Côn lôn...)' },
+            { label: '2. Quyên tý thang (Phong hàn thấp tý - nửa người trên)', name: '2. Quyên tý thang', theBenh: 'Phong hàn thấp tý (Đau mỏi vai gáy, chi trên)', phapTri: 'Khu phong, trừ thấp, ôn kinh, hoạt lạc', congThuc: 'Khương hoạt 12g, Độc hoạt 12g, Quế tâm 6g, Tần giao 12g, Đương quy 12g, Xuyên khung 8g, Nhũ hương 6g, Mộc hương 6g, Cam thảo 4g, Tang chi 12g. Sắc uống.', thuThuat: 'Điện châm, Xoa bóp bấm huyệt, Cứu ngải vùng Cổ vai gáy (Phong trì, Kiên tỉnh, Kiên ngung, Khúc trì, Ngoại quan, Hợp cốc...)' },
+            { label: '3. Quế chi gia cát căn thang (Ngoại cảm phong hàn, cứng gáy)', name: '3. Quế chi gia cát căn thang', theBenh: 'Ngoại cảm phong hàn (Đau cứng cổ vai gáy cấp)', phapTri: 'Giải cơ, khu phong, tán hàn', congThuc: 'Quế chi 8g, Bạch thược 12g, Cát căn 12g, Sinh khương 8g, Đại táo 3 quả, Cam thảo 4g, Ma hoàng 6g (có thể gia giảm). Sắc uống.', thuThuat: 'Xoa bóp bấm huyệt (lăn, day, bóp, vờn) vùng cổ vai, Ôn châm Phong trì, Kiên tỉnh, Đại chùy, Lạc chẩm.' },
+            { label: '4. Phòng phong thang (Phong hàn thấp tý - Thiên phong)', name: '4. Phòng phong thang', theBenh: 'Hành tý (Đau khớp di chuyển nhiều khớp)', phapTri: 'Khu phong, tán hàn, trừ thấp, hành khí hoạt huyết', congThuc: 'Phòng phong 12g, Khương hoạt 12g, Đương quy 12g, Tần giao 12g, Cát căn 12g, Phục linh 12g, Quế chi 8g, Hoàng cầm 8g, Sinh khương 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Điện châm tả các a thị huyệt, Huyết hải, Cách du, Hợp cốc, Phong môn.' },
+            { label: '5. Can khương thương truật thang (Hàn thấp tý)', name: '5. Can khương thương truật thang', theBenh: 'Hàn thấp tý (Thống tý - Đau cố định, chườm ấm đỡ)', phapTri: 'Ôn kinh tán hàn, táo thấp chỉ thống', congThuc: 'Can khương 8g, Thương truật 12g, Quế chi 8g, Phục linh 12g, Bạch truật 12g, Cam thảo 4g. Sắc uống.', thuThuat: 'Cứu ngải, Ôn châm, Chườm ngải cứu vùng đau. Huyệt: Thận du, Quan nguyên, Khí hải và A thị huyệt.' },
+            { label: '6. Ý dĩ nhân thang (Phong hàn thấp tý - Thiên thấp)', name: '6. Ý dĩ nhân thang', theBenh: 'Trước tý (Tê nặng chi, sưng nề, đau cố định)', phapTri: 'Trị thấp, khu phong tán hàn', congThuc: 'Ý dĩ nhân 20g, Thương truật 12g, Khương hoạt 12g, Độc hoạt 12g, Phòng phong 12g, Quế chi 8g, Đương quy 12g, Xuyên khung 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Điện châm, Cứu ngải A thị huyệt, Tỳ du, Vị du, Túc tam lý, Âm lăng tuyền, Phong long.' },
+            { label: '7. Ý dĩ nhân thang hợp Nhị diệu tán (Thấp nhiệt tý)', name: '7. Ý dĩ nhân thang hợp Nhị diệu tán', theBenh: 'Thấp nhiệt tý (Viêm khớp cấp, sưng nóng đỏ đau)', phapTri: 'Thanh nhiệt lợi thấp, thông lạc chỉ thống', congThuc: 'Ý dĩ nhân 20g, Thương truật 12g, Hoàng bá 12g, Ngưu tất 12g, Kim ngân hoa 16g, Liên kiều 12g, Tri mẫu 8g, Phòng kỷ 12g. Sắc uống.', thuThuat: 'Châm tả, KHÔNG cứu ngải. Huyệt: Huyết hải, Khúc trì, Hợp cốc, Âm lăng tuyền, Đại chùy, A thị huyệt.' },
+            { label: '8. Tuyên tý thang (Phong thấp nhiệt tý)', name: '8. Tuyên tý thang', theBenh: 'Phong thấp nhiệt tý (Viêm đa khớp dạng thấp thể tiến triển)', phapTri: 'Thanh nhiệt tuyên tý, hoạt lạc chỉ thống', congThuc: 'Phòng kỷ 12g, Hạnh nhân 12g, Hoạt thạch 16g, Ý dĩ nhân 20g, Tàm sa 12g, Bán hạ 8g, Liên kiều 12g, Chi tử 8g, Qua lâu bì 12g, Xích tiểu đậu 16g. Sắc uống.', thuThuat: 'Châm tả các A thị huyệt, Khúc trì, Hợp cốc, Huyết hải, Túc tam lý.' },
+            { label: '9. Thân thống trục ứ thang (Khí trệ huyết ứ toàn thân)', name: '9. Thân thống trục ứ thang', theBenh: 'Khí trệ huyết ứ (Đau nhức toàn thân do ứ huyết, đau như dùi đâm)', phapTri: 'Hoạt huyết hành khí, thông lạc chỉ thống', congThuc: 'Đào nhân 12g, Hồng hoa 8g, Đương quy 12g, Xuyên khung 8g, Ngưu tất 12g, Một dược 8g, Ngũ linh chi 8g, Địa long 8g, Tần giao 12g, Khương hoạt 12g, Hương phụ 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Thủy châm, Điện châm Huyết hải, Cách du, Hợp cốc, Thái xung và A thị huyệt. Xoa bóp bấm huyệt hành khí hoạt huyết.' },
+            { label: '10. Bổ dương hoàn ngũ thang (Di chứng trúng phong)', name: '10. Bổ dương hoàn ngũ thang', theBenh: 'Khí hư huyết ứ (Di chứng tai biến liệt nửa người, teo cơ)', phapTri: 'Bổ khí hoạt huyết, thông lạc', congThuc: 'Hoàng kỳ (sống) 60-120g, Đương quy vĩ 12g, Xích thược 12g, Địa long 8g, Xuyên khung 8g, Đào nhân 8g, Hồng hoa 8g. Sắc uống.', thuThuat: 'Điện châm, Thủy châm các huyệt bên liệt (Kiên ngung, Khúc trì, Hợp cốc, Hoàn khiêu, Túc tam lý, Giải khê). Phục hồi chức năng vận động.' },
+            { label: '11. Đại tần giao thang (Trúng phong kinh lạc)', name: '11. Đại tần giao thang', theBenh: 'Phong tà trúng kinh lạc (Tai biến nhẹ, méo miệng, liệt nửa người)', phapTri: 'Khu phong thanh nhiệt, dưỡng huyết hoạt lạc', congThuc: 'Tần giao 12g, Đương quy 12g, Xuyên khung 8g, Bạch thược 12g, Thục địa 12g, Độc hoạt 8g, Khương hoạt 8g, Phòng phong 8g, Bạch chỉ 8g, Hoàng cầm 8g, Thạch cao 16g, Bạch truật 12g, Phục linh 12g, Sinh địa 12g, Cam thảo 4g. Sắc uống.', thuThuat: 'Điện châm huyệt vùng mặt (Địa thương, Giáp xa, Nghinh hương, Toán trúc, Dương bạch) và huyệt chi liệt. Cứu ngải.' },
+            { label: 'Tam tý thang (Khí huyết hư, phong hàn thấp)', name: 'Tam tý thang', theBenh: 'Khí huyết đều hư kiêm phong hàn thấp tý (Đau khớp mạn tính, teo cơ, mỏi mệt)', phapTri: 'Ích khí dưỡng huyết, khu phong thắng thấp, ôn kinh chỉ thống', congThuc: 'Đảng sâm 12g, Hoàng kỳ 12g, Đương quy 12g, Bạch thược 12g, Sinh địa 12g, Xuyên khung 8g, Độc hoạt 12g, Tần giao 12g, Phòng phong 12g, Quế tâm 4g, Tế tân 4g, Đỗ trọng 12g, Ngưu tất 12g, Phục linh 12g, Cam thảo 4g. Sắc uống.', thuThuat: 'Cứu ngải, ôn châm các huyệt Tỳ du, Thận du, Túc tam lý và các huyệt tại chỗ.' },
+            { label: 'Bạch hổ gia quế chi thang (Phong thấp nhiệt tý)', name: 'Bạch hổ gia quế chi thang', theBenh: 'Phong thấp nhiệt tý (Viêm khớp cấp sưng nóng đỏ đau mạnh)', phapTri: 'Thanh nhiệt giải độc, sơ phong thông lạc', congThuc: 'Thạch cao 30g, Tri mẫu 12g, Cam thảo 4g, Ngạnh mễ (Gạo tẻ) 20g, Quế chi 6g. Sắc uống.', thuThuat: 'Châm tả các huyệt tại chỗ, không cứu. Kết hợp Khúc trì, Hợp cốc, Đại chùy.' },
+            { label: 'Quyên tý gia giảm (Cổ vai gáy - mạn tính)', name: 'Quyên tý gia giảm', theBenh: 'Hàn thấp ứ trệ (Đau mỏi vai gáy mạn, thoái hóa cột sống cổ)', phapTri: 'Khu phong tán hàn, hoạt huyết thông lạc', congThuc: 'Khương hoạt 12g, Độc hoạt 12g, Đương quy 12g, Xuyên khung 8g, Kê huyết đằng 16g, Cát căn 16g, Xích thược 12g, Uy linh tiên 12g, Nhũ hương 6g, Cam thảo 4g. Sắc uống.', thuThuat: 'Điện châm Kiên tỉnh, Phong trì, Bách lao, Kiên ngung, Khúc trì.' },
+            { label: '12. Lục vị địa hoàng hoàn (Can thận âm hư)', name: '12. Lục vị địa hoàng hoàn', theBenh: 'Can thận âm hư (Tăng HA, Tiểu đường, Mãn dục)', phapTri: 'Tư bổ can thận âm', congThuc: 'Thục địa 24g, Hoài sơn 12g, Sơn thù 12g, Đan bì 9g, Phục linh 9g, Trạch tả 9g. Sắc uống hoặc làm hoàn.', thuThuat: 'Châm bổ Thận du, Can du, Thái khê, Tam âm giao.' },
+            { label: '13. Tả quy hoàn (Chân âm bất túc)', name: '13. Tả quy hoàn', theBenh: 'Chân âm bất túc, tinh tủy tổn thương (Loãng xương, teo tủy)', phapTri: 'Tư âm bổ thận, điền tinh ích tủy', congThuc: 'Thục địa 30g, Hoài sơn 16g, Câu kỷ tử 16g, Sơn thù 16g, Ngưu tất 12g, Thỏ ty tử 16g, Lộc giác giao 16g, Quy bản giao 16g. Sắc uống.', thuThuat: 'Châm bổ Thái khê, Tam âm giao, Mệnh môn, Thận du.' },
+            { label: '14. Bát vị quế phụ (Thận dương hư)', name: '14. Bát vị quế phụ', theBenh: 'Thận dương hư (Sợ lạnh, liệt dương, tiểu đêm)', phapTri: 'Ôn bổ thận dương', congThuc: 'Thục địa 24g, Hoài sơn 12g, Sơn thù 12g, Đan bì 9g, Phục linh 9g, Trạch tả 9g, Nhục quế 4g, Phụ tử chế 4g. Sắc uống.', thuThuat: 'Cứu ngải Mệnh môn, Thận du, Quan nguyên, Khí hải.' },
+            { label: '15. Hữu quy hoàn (Thận dương suy vi)', name: '15. Hữu quy hoàn', theBenh: 'Thận dương suy vi, mệnh môn hỏa suy (Suy sinh dục nặng)', phapTri: 'Ôn bổ thận dương, điền tinh bổ huyết', congThuc: 'Thục địa 24g, Hoài sơn 16g, Sơn thù 12g, Câu kỷ tử 16g, Lộc giác giao 16g, Thỏ ty tử 16g, Đỗ trọng 16g, Đương quy 12g, Nhục quế 8g, Phụ tử chế 8g. Sắc uống.', thuThuat: 'Cứu ngải, Ôn châm Mệnh môn, Quan nguyên, Khí hải, Thần khuyết.' },
+            { label: '16. Tứ quân tử thang (Tỳ vị khí hư)', name: '16. Tứ quân tử thang', theBenh: 'Tỳ vị khí hư (Ăn kém, mệt mỏi, phân nát)', phapTri: 'Ích khí, kiện tỳ', congThuc: 'Nhân sâm (hoặc Đảng sâm) 12g, Bạch truật 12g, Phục linh 12g, Cam thảo 4g. Sắc uống.', thuThuat: 'Cứu ngải Tỳ du, Vị du, Túc tam lý, Trung quản.' },
+            { label: '17. Lục quân tử thang (Tỳ hư có đàm thấp)', name: '17. Lục quân tử thang', theBenh: 'Tỳ vị khí hư kiêm đàm thấp (Ăn kém, đầy bụng, ho đờm)', phapTri: 'Kiện tỳ, ích khí, hóa đàm', congThuc: 'Đảng sâm 12g, Bạch truật 12g, Phục linh 12g, Cam thảo 4g, Bán hạ chế 8g, Trần bì 8g. Sắc uống.', thuThuat: 'Châm bổ Tỳ du, Vị du. Châm bình Phong long, Túc tam lý.' },
+            { label: '18. Tứ vật thang (Huyết hư)', name: '18. Tứ vật thang', theBenh: 'Huyết hư (Thiếu máu, kinh nguyệt không đều, hoa mắt)', phapTri: 'Bổ huyết, điều huyết', congThuc: 'Thục địa 16g, Đương quy 12g, Bạch thược 12g, Xuyên khung 8g. Sắc uống.', thuThuat: 'Châm bổ Huyết hải, Cách du, Can du, Tam âm giao.' },
+            { label: '19. Đào hồng tứ vật thang / Đào hồng ẩm (Huyết ứ kiêm huyết hư)', name: '19. Đào hồng tứ vật thang', theBenh: 'Huyết ứ trệ trên nền huyết hư (Rối loạn kinh nguyệt máu cục)', phapTri: 'Dưỡng huyết, hoạt huyết, trục ứ', congThuc: 'Thục địa 16g, Đương quy 12g, Bạch thược 12g, Xuyên khung 8g, Đào nhân 8g, Hồng hoa 6g. Sắc uống.', thuThuat: 'Điện châm Huyết hải, Cách du, Khí hải, Tam âm giao.' },
+            { label: '20. Bát trân thang (Khí huyết lưỡng hư)', name: '20. Bát trân thang', theBenh: 'Khí huyết lưỡng hư (Suy nhược cơ thể)', phapTri: 'Khí huyết song bổ', congThuc: 'Đảng sâm 12g, Bạch truật 12g, Phục linh 12g, Cam thảo 4g, Thục địa 16g, Đương quy 12g, Bạch thược 12g, Xuyên khung 8g. Sắc uống.', thuThuat: 'Cứu ngải Khí hải, Quan nguyên. Châm bổ Túc tam lý, Huyết hải, Cách du.' },
+            { label: '21. Thập toàn đại bổ thang (Khí huyết hư hàn)', name: '21. Thập toàn đại bổ thang', theBenh: 'Khí huyết hư hàn (Suy nhược nặng, lạnh tay chân)', phapTri: 'Ôn bổ khí huyết', congThuc: 'Đảng sâm 12g, Bạch truật 12g, Phục linh 12g, Cam thảo 4g, Thục địa 16g, Đương quy 12g, Bạch thược 12g, Xuyên khung 8g, Hoàng kỳ 12g, Nhục quế 4g. Sắc uống.', thuThuat: 'Cứu ngải diện rộng các huyệt Mệnh môn, Khí hải, Quan nguyên, Túc tam lý, Dũng tuyền.' },
+            { label: '22. Quy tỳ thang (Tâm tỳ lưỡng hư)', name: '22. Quy tỳ thang', theBenh: 'Tâm tỳ lưỡng hư (Mất ngủ, hay quên, suy nhược)', phapTri: 'Kiện tỳ, dưỡng tâm, ích khí, bổ huyết', congThuc: 'Đảng sâm 12g, Hoàng kỳ 12g, Bạch truật 12g, Phục thần 12g, Toan táo nhân 12g, Long nhãn 12g, Mộc hương 4g, Cam thảo 4g, Đương quy 12g, Viễn chí 6g. Sắc uống.', thuThuat: 'Châm bổ Tâm du, Tỳ du, Nội quan, Thần môn, Tam âm giao, Túc tam lý.' },
+            { label: '23. Bổ trung ích khí thang (Trung khí hạ hãm)', name: '23. Bổ trung ích khí thang', theBenh: 'Tỳ vị hư nhược, trung khí hạ hãm (Sa tạng phủ, trĩ)', phapTri: 'Bổ trung, ích khí, thăng đề', congThuc: 'Hoàng kỳ 16g, Đảng sâm 12g, Bạch truật 12g, Đương quy 12g, Trần bì 6g, Thăng ma 6g, Sài hồ 6g, Cam thảo 4g. Sắc uống.', thuThuat: 'Cứu ngải Bách hội, Khí hải, Quan nguyên, Túc tam lý.' },
+            { label: '24. Sinh mạch tán (Khí âm lưỡng hư)', name: '24. Sinh mạch tán', theBenh: 'Khí âm lưỡng hư (Khát nước, mồ hôi nhiều, trụy mạch)', phapTri: 'Ích khí, liễm hãn, dưỡng âm, sinh tân', congThuc: 'Nhân sâm 12g, Mạch môn 16g, Ngũ vị tử 6g. Sắc uống.', thuThuat: 'Bấm huyệt Nội quan, Thái uyên, Thần môn. Hạn chế châm cứu kích thích mạnh.' },
+            { label: '25. Thiên ma câu đằng ẩm (Can dương thượng kháng)', name: '25. Thiên ma câu đằng ẩm', theBenh: 'Can dương thượng kháng (Tăng HA, đau đầu, chóng mặt, tiền đình)', phapTri: 'Bình can, tức phong, tư âm, thanh nhiệt', congThuc: 'Thiên ma 8g, Câu đằng 12g (cho sau), Thạch quyết minh 20g, Chi tử 8g, Hoàng cầm 8g, Ngưu tất 12g, Đỗ trọng 12g, Ích mẫu 12g, Tang ký sinh 12g, Dạ giao đằng 12g, Phục thần 12g. Sắc uống.', thuThuat: 'Châm tả Thái xung, Hành gian, Phong trì, Bách hội, Ấn đường.' },
+            { label: '26. Trấn can tức phong thang (Can dương hóa phong)', name: '26. Trấn can tức phong thang', theBenh: 'Can thận âm hư, can dương hóa phong (TBMMN nhồi máu)', phapTri: 'Trấn can, tức phong, tư âm, tiềm dương', congThuc: 'Ngưu tất 20g, Đại giả thạch 20g, Long cốt 16g, Mẫu lệ 16g, Quy bản 16g, Bạch thược 16g, Huyền sâm 16g, Thiên môn 12g, Xuyên luyện tử 8g, Nhân trần 12g, Mạch nha 12g, Cam thảo 4g. Sắc uống.', thuThuat: 'Châm tả Thái xung, Phong trì. Châm bổ Can du, Thận du, Tam âm giao.' },
+            { label: '27. Bán hạ bạch truật thiên ma thang (Phong đàm nhiễu não)', name: '27. Bán hạ bạch truật thiên ma thang', theBenh: 'Phong đàm nhiễu não (Chóng mặt nhiều, nôn mửa, tiền đình)', phapTri: 'Hóa đàm, tức phong, kiện tỳ, trừ thấp', congThuc: 'Bán hạ chế 12g, Bạch truật 12g, Thiên ma 8g, Phục linh 12g, Quất hồng (Trần bì) 8g, Cam thảo 4g, Sinh khương 8g, Đại táo 3 quả. Sắc uống.', thuThuat: 'Châm Phong long, Túc tam lý, Trung quản, Nội quan, Phong trì, Đầu duy.' },
+            { label: '28. Thiên vương bổ tâm đan (Tâm thận bất giao)', name: '28. Thiên vương bổ tâm đan', theBenh: 'Âm hư huyết thiểu, tâm thận bất giao (Mất ngủ, hồi hộp, hay quên)', phapTri: 'Tư âm, dưỡng huyết, bổ tâm, an thần', congThuc: 'Sinh địa 30g, Nhân sâm 12g, Huyền sâm 12g, Đan sâm 12g, Phục linh 12g, Viễn chí 12g, Cát cánh 12g, Đương quy 12g, Thiên môn 12g, Mạch môn 12g, Bá tử nhân 12g, Toan táo nhân 12g, Ngũ vị tử 6g. Sắc uống.', thuThuat: 'Châm bổ Tâm du, Thận du, Thần môn, Nội quan, Tam âm giao, Dũng tuyền.' },
+            { label: '29. Toan táo nhân thang (Can huyết bất túc)', name: '29. Toan táo nhân thang', theBenh: 'Can huyết bất túc, hư nhiệt nội nhiễu (Mất ngủ, hồi hộp, đạo hãn)', phapTri: 'Dưỡng huyết an thần, thanh nhiệt trừ phiền', congThuc: 'Toan táo nhân (sao) 20g, Phục linh 12g, Tri mẫu 8g, Xuyên khung 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Châm bổ Can du, Tâm du, Thần môn, Tam âm giao, Huyết hải.' },
+            { label: '30. Cam mạch đại táo thang (Tạng táo)', name: '30. Cam mạch đại táo thang', theBenh: 'Tạng táo (Tâm thần không yên, vui buồn thất thường, lo âu)', phapTri: 'Dưỡng tâm an thần, hòa trung hoãn cấp', congThuc: 'Cam thảo 12g, Tiểu mạch 30g, Đại táo 10 quả. Sắc uống.', thuThuat: 'Xoa bóp nhẹ nhàng thư giãn. Châm bổ Thần môn, Nội quan, Bách hội, Ấn đường.' },
+            { label: '31. Sài hồ sơ can tán (Can uất khí trệ)', name: '31. Sài hồ sơ can tán', theBenh: 'Can uất khí trệ (Đau mạn sườn, viêm loét dạ dày tá tràng)', phapTri: 'Sơ can, hành khí, hoạt huyết, chỉ thống', congThuc: 'Sài hồ 12g, Trần bì 8g, Xuyên khung 8g, Bạch thược 12g, Chỉ xác 8g, Hương phụ 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Châm tả Thái xung, Kỳ môn, Chương môn, Nội quan. Châm bình Túc tam lý.' },
+            { label: '32. Tiêu dao tán (Can uất tỳ hư)', name: '32. Tiêu dao tán', theBenh: 'Can uất tỳ hư (Căng thẳng, rối loạn kinh nguyệt, mệt mỏi)', phapTri: 'Sơ can, giải uất, kiện tỳ, dưỡng huyết', congThuc: 'Sài hồ 12g, Đương quy 12g, Bạch thược 12g, Bạch truật 12g, Phục linh 12g, Cam thảo 4g, Bạc hà 4g, Sinh khương 3 lát. Sắc uống.', thuThuat: 'Châm tả Thái xung, châm bổ Can du, Tỳ du, Huyết hải, Túc tam lý.' },
+            { label: '33. Bình vị tán (Tỳ vị thấp trệ)', name: '33. Bình vị tán', theBenh: 'Tỳ vị thấp trệ (Đầy bụng, buồn nôn, ăn kém)', phapTri: 'Táo thấp, kiện tỳ, hành khí, hòa vị', congThuc: 'Thương truật 16g, Hậu phác 12g, Trần bì 8g, Cam thảo 4g, Sinh khương, Đại táo. Sắc uống.', thuThuat: 'Châm Túc tam lý, Trung quản, Nội quan, Thiên khu.' },
+            { label: '34. Sâm linh bạch truật tán (Tỳ hư thấp thịnh)', name: '34. Sâm linh bạch truật tán', theBenh: 'Tỳ hư thấp thịnh (Tiêu chảy mạn, viêm đại tràng)', phapTri: 'Ích khí, kiện tỳ, thẩm thấp, chỉ tả', congThuc: 'Đảng sâm 12g, Bạch truật 12g, Phục linh 12g, Cam thảo 4g, Hoài sơn 12g, Liên nhục 12g, Bạch biển đậu 12g, Ý dĩ 12g, Sa nhân 4g, Cát cánh 6g. Sắc uống.', thuThuat: 'Cứu ngải Tỳ du, Vị du, Đại trường du, Thiên khu, Túc tam lý.' },
+            { label: '35. Hoắc hương chính khí tán (Ngoại cảm nội thương)', name: '35. Hoắc hương chính khí tán', theBenh: 'Ngoại cảm phong hàn, nội thương thấp trệ (Rối loạn tiêu hóa cấp)', phapTri: 'Giải biểu, hóa thấp, lý khí, hòa trung', congThuc: 'Hoắc hương 12g, Tử tô 12g, Bạch chỉ 8g, Đại phúc bì 12g, Phục linh 12g, Bạch truật 12g, Bán hạ 8g, Hậu phác 8g, Trần bì 8g, Cát cánh 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Châm Hợp cốc, Nội quan, Túc tam lý, Thiên khu. Xoa bóp bụng.' },
+            { label: '36. Nhị trần thang (Đàm thấp trở trệ)', name: '36. Nhị trần thang', theBenh: 'Đàm thấp trở trệ (Ho có đờm, chóng mặt)', phapTri: 'Táo thấp, hóa đàm, lý khí, hòa trung', congThuc: 'Bán hạ chế 12g, Trần bì 8g, Phục linh 12g, Cam thảo 4g, Sinh khương 3 lát. Sắc uống.', thuThuat: 'Châm Phong long, Túc tam lý, Phế du, Tỳ du.' },
+            { label: '37. Huyết phủ trục ứ thang (Huyết ứ trệ ở hung cách)', name: '37. Huyết phủ trục ứ thang', theBenh: 'Huyết ứ trệ ở hung cách (Cơn đau thắt ngực)', phapTri: 'Hoạt huyết, hóa ứ, hành khí, chỉ thống', congThuc: 'Đào nhân 12g, Hồng hoa 8g, Đương quy 12g, Sinh địa 12g, Xuyên khung 8g, Xích thược 12g, Ngưu tất 12g, Cát cánh 6g, Sài hồ 6g, Chỉ xác 8g, Cam thảo 4g. Sắc uống.', thuThuat: 'Châm Nội quan, Khích môn, Đản trung, Tâm du, Cách du.' },
+            { label: '38. Ôn đởm thang (Đởm vị bất hòa)', name: '38. Ôn đởm thang', theBenh: 'Đởm vị bất hòa, đàm nhiệt nội nhiễu', phapTri: 'Thanh đởm, hòa vị, lý khí, hóa đàm', congThuc: 'Bán hạ chế 8g, Trúc nhự 12g, Chỉ thực 8g, Trần bì 8g, Phục linh 12g, Cam thảo 4g. Sắc uống.', thuThuat: 'Châm Nội quan, Thần môn, Phong long, Đởm du.' },
+            { label: '39. Nhị diệu tán (Thấp nhiệt hạ chú)', name: '39. Nhị diệu tán', theBenh: 'Thấp nhiệt hạ chú (Viêm khớp cấp, sưng nóng đỏ, khí hư)', phapTri: 'Thanh nhiệt, táo thấp', congThuc: 'Thương truật 12g, Hoàng bá 12g. Sắc uống.', thuThuat: 'Châm tả Tam âm giao, Huyết hải, Âm lăng tuyền.' },
+            { label: '40. Ma hoàng thang (Ngoại cảm phong hàn biểu thực)', name: '40. Ma hoàng thang', theBenh: 'Ngoại cảm phong hàn biểu thực (Cảm mạo rét run, không mồ hôi)', phapTri: 'Phát hãn, giải biểu, tuyên phế, bình suyễn', congThuc: 'Ma hoàng 8g, Quế chi 6g, Hạnh nhân 8g, Cam thảo 4g. Sắc uống nóng.', thuThuat: 'Châm tả Hợp cốc, Phong trì, Đại chùy, Phế du. Cứu ngải.' }
+        ];
+
+        const initialRecordState = {
+            hoTen: '', ngaySinh: '', tuoi: '', gioiTinh: '1', ngheNghiep: '', danToc: 'Kinh', quocTich: 'Việt Nam',
+            diaChi: '', doiTuong: '1', soBHYT: '', bhytDenNgay: '', nguoiNha: '', dienThoai: '',
+            vaoVienNgay: '', vaoVienGio: '', trucTiepVao: '2', noiGioiThieu: '2', vaoKhoa: '', vaoKhoaNgay: '', vaoKhoaGio: '',
+            chuyenKhoa: '', chuyenKhoaNgay: '', chuyenKhoaGio: '', raVienNgay: '', raVienGio: '', raVienHinhThuc: '1', tongSoNgay: '',
+            ngayLamBenhAn: '', gioLamBenhAn: '', 
+            trieuChung: '', benhSu: '', tienSuBanThan: '', tienSuGiaDinh: '',
+            khamToanThan: '', khamTuanHoan: '', khamHoHap: '', khamTieuHoa: '', khamThanTietNieuSinhDuc: '', 
+            khamThanKinh: '', khamCoXuongKhop: '', khamTaiMuiHong: '', khamRangHamMat: '', khamMat: '', khamNoiTietDinhDuong: '',
+            mach: '', nhietDo: '', huyetAp: '', nhipTho: '', canNang: '', chieuCao: '', bmi: '',
+            clsChiDinh: '', clsItems: [], tomTatBenhAn: '',
+            vongHinhThai: [], vongThan: [], vongSac: [], vongTrach: [], luoiHinhThai: [], luoiChat: [], luoiReu: [], vongMoTaKhac: '',
+            vanTiengNoi: [], vanHoiTho: [], vanHo: [], vanNac: [], vanMuiCoThe: [], vanChatThai: [], vanMoTaKhac: '',
+            vanHanNhiet: [], vanMoHoi: [], vanDauDau: [], vanHoaMat: [], vanMat: [], vanTai: [], vanMui: [], vanHong: [], vanCoVai: [], vanLung: [], vanNguc: [], vanBung: [], vanChanTay: [], vanAn: [], vanUong: [], vanDaiTien: [], vanTieuTien: [], vanNgu: [], vanSinhDucNam: [], vanSinhDucNu: [], vanKinhNguyet: [], vanThongKinh: [], vanDoiHa: [], vanYeuToLienQuan: [], vanDapMoTaKhac: '',
+            thietDa: [], thietCoXuongKhop: [], thietBung: [], thietMoHoi: [], machChan: [], machTongKhanPhai: '', machTongKhanTrai: '', machTraiThon: '', machTraiQuan: '', machTraiXich: '', machPhaiThon: '', machPhaiQuan: '', machPhaiXich: '', thietMoTaKhac: '',
+            cdYhhdBenhChinh: '', cdYhhhdMa: '', cdYhhdBenhKem: '', cdPhanBiet: '',
+            huongDieuTriYhhd: '', dieuTriCuTheYhhd: '', vltlPhcn: '', tienLuongYhhd: '', duPhongYhhd: '', 
+            tomTatTuChan: '', bienChungLuanTri: '',
+            cdYhctBenhChinh: '', cdYhctBenhKem: '', batCuong: [], tangPhu: [], nguyenNhan: [],
+            phapDieuTri: '', phuongDuoc: '', phuongPhapKhac: '', tienLuongYhct: '', duHauYhct: ''
+        };
+
+        // --- CÁC HÀM COMPONENT CƠ BẢN ---
+        const Icon = ({ name, size = 18, className = "" }) => {
+            const icons = {
+                User: <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>,
+                Activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>,
+                Stethoscope: <><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3A3 3 0 0 1 12 5v5a5 5 0 0 1-5 5v0a5 5 0 0 1-5-5V5a3 3 0 0 1 .8-2.7z"/><path d="M8 15v8"/><circle cx="8" cy="23" r="1"/></>,
+                FileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></>,
+                Save: <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>,
+                Printer: <><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></>,
+                Plus: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
+                FlaskConical: <><path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/><line x1="5.52" y1="16" x2="18.48" y2="16"/></>,
+                Pill: <><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></>,
+                Leaf: <><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></>,
+                Search: <><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>,
+                Check: <polyline points="20 6 9 17 4 12"/>,
+                ChevronDown: <polyline points="6 9 12 15 18 9"/>,
+                RefreshCw: <><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>,
+                Archive: <><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></>,
+                List: <><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></>,
+                Trash2: <><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></>
+            };
+            return (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                    {icons[name] || icons.User}
+                </svg>
+            );
+        }
+
+        const Input = ({ label, type = 'text', value, onChange, placeholder, className = '' }) => (
+            <div className={`flex flex-col space-y-1 ${className}`}>
+                {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
+                <input type={type} value={value} onChange={onChange} placeholder={placeholder} className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow bg-white" />
+            </div>
+        );
+
+        const TextArea = ({ label, value, onChange, placeholder, rows = 3, className = '' }) => (
+            <div className={`flex flex-col space-y-1 ${className}`}>
+                {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
+                <textarea value={value} onChange={onChange} placeholder={placeholder} rows={rows} className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow resize-y bg-white" />
+            </div>
+        );
+
+        const CheckboxGroup = ({ label, options, selectedValues, onChange }) => {
+            const handleToggle = (val) => {
+                if (selectedValues.includes(val)) {
+                    onChange(selectedValues.filter(v => v !== val));
+                } else {
+                    onChange([...selectedValues, val]);
+                }
+            };
+            return (
+                <div className="flex flex-col space-y-2 mb-4">
+                    {label && <label className="text-sm font-semibold text-slate-800">{label}</label>}
+                    <div className="flex flex-wrap gap-3">
+                        {options.map((opt) => (
+                            <label key={opt.value} className="flex items-center space-x-2 cursor-pointer group">
+                                <input type="checkbox" checked={selectedValues.includes(opt.value)} onChange={() => handleToggle(opt.value)} className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500" />
+                                <span className="text-sm text-slate-700 group-hover:text-slate-900">{opt.label}</span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const AutocompleteSearch = ({ label, placeholder, data, onSelect, iconName }) => {
+            const [searchTerm, setSearchTerm] = useState('');
+            const [showSuggestions, setShowSuggestions] = useState(false);
+            const wrapperRef = useRef(null);
+
+            useEffect(() => {
+                function handleClickOutside(event) {
+                    if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                        setShowSuggestions(false);
+                    }
+                }
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => document.removeEventListener("mousedown", handleClickOutside);
+            }, [wrapperRef]);
+
+            const filtered = data.filter(item => {
+                const textToSearch = typeof item === 'object' ? item.label : item;
+                return textToSearch.toLowerCase().includes(searchTerm.toLowerCase());
+            }).slice(0, 20);
+
+            return (
+                <div ref={wrapperRef} className="relative flex flex-col space-y-1">
+                    {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
+                    <div className="relative">
+                        {iconName && <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><Icon name={iconName} size={16} /></div>}
+                        <input
+                            type="text"
+                            className={`w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${iconName ? 'pl-9' : ''}`}
+                            placeholder={placeholder}
+                            value={searchTerm}
+                            onChange={(e) => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
+                            onFocus={() => setShowSuggestions(true)}
+                        />
+                    </div>
+                    {showSuggestions && searchTerm && filtered.length > 0 && (
+                        <ul className="absolute z-50 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1 top-full left-0">
+                            {filtered.map((item, idx) => (
+                                <li
+                                    key={idx}
+                                    className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm border-b last:border-b-0 text-slate-700"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        onSelect(item);
+                                        setSearchTerm('');
+                                        setShowSuggestions(false);
+                                    }}
+                                >
+                                    {typeof item === 'object' ? item.label : item}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            );
+        };
+
+        // --- BẢN IN CHI TIẾT (PRINT VIEW) ---
+        const PrintableView = ({ record }) => (
+            <div id="printable-area" className="export-area print-show" style={{lineHeight: '1.6'}}>
+                <div style={{textAlign: 'center', marginBottom: '20px'}}>
+                    <h1 style={{fontSize: '24px', fontWeight: 'bold', margin: '0'}}>BỆNH ÁN Y HỌC CỔ TRUYỀN</h1>
+                </div>
+                
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>I. HÀNH CHÍNH</h3>
+                <p><strong>1. Họ và tên:</strong> {record.hoTen} &nbsp;&nbsp;&nbsp; <strong>2. Ngày sinh:</strong> {record.ngaySinh} ({record.tuoi} tuổi) &nbsp;&nbsp;&nbsp; <strong>3. Giới tính:</strong> {record.gioiTinh === '1' ? 'Nam' : 'Nữ'}</p>
+                <p><strong>4. Nghề nghiệp:</strong> {record.ngheNghiep} &nbsp;&nbsp;&nbsp; <strong>5. Dân tộc:</strong> {record.danToc} &nbsp;&nbsp;&nbsp; <strong>6. Quốc tịch:</strong> {record.quocTich}</p>
+                <p><strong>7. Địa chỉ:</strong> {record.diaChi}</p>
+                <p><strong>8. Đối tượng:</strong> {record.doiTuong === '1' ? 'BHYT' : 'Khác'} &nbsp;&nbsp;&nbsp; <strong>Số BHYT:</strong> {record.soBHYT}</p>
+                <p><strong>9. Người nhà:</strong> {record.nguoiNha} &nbsp;&nbsp;&nbsp; <strong>Điện thoại:</strong> {record.dienThoai}</p>
+                
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>II. LÝ DO & BỆNH SỬ</h3>
+                <p><strong>1. Thời gian vào viện:</strong> {record.vaoVienGio} {record.vaoVienNgay} &nbsp;&nbsp;&nbsp; <strong>Thời gian làm bệnh án:</strong> {record.gioLamBenhAn} {record.ngayLamBenhAn}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>2. Lý do vào viện:</strong> {record.trieuChung}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>3. Bệnh sử:</strong><br/>{record.benhSu}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>4. Tiền sử bản thân:</strong> {record.tienSuBanThan}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>5. Tiền sử gia đình:</strong> {record.tienSuGiaDinh}</p>
+                
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>III. KHÁM BỆNH Y HỌC HIỆN ĐẠI</h3>
+                <p><strong>1. Chỉ số sinh tồn:</strong> Mạch: {record.mach} l/p &nbsp;|&nbsp; Nhiệt độ: {record.nhietDo} °C &nbsp;|&nbsp; Huyết áp: {record.huyetAp} mmHg &nbsp;|&nbsp; Nhịp thở: {record.nhipTho} l/p &nbsp;|&nbsp; BMI: {record.bmi}</p>
+                <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>2. Khám toàn thân:</strong> {record.khamToanThan}</div>
+                <p><strong>3. Các cơ quan:</strong></p>
+                <div style={{paddingLeft: '10px'}}>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Tuần hoàn:</strong> {record.khamTuanHoan}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Hô hấp:</strong> {record.khamHoHap}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Tiêu hóa:</strong> {record.khamTieuHoa}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Thận - Tiết niệu - Sinh dục:</strong> {record.khamThanTietNieuSinhDuc}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Thần kinh:</strong> {record.khamThanKinh}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Cơ xương khớp:</strong> {record.khamCoXuongKhop}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Tai - Mũi - Họng:</strong> {record.khamTaiMuiHong}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Răng - Hàm - Mặt:</strong> {record.khamRangHamMat}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Mắt:</strong> {record.khamMat}</div>
+                    <div style={{marginBottom: '8px', whiteSpace: 'pre-wrap'}}><strong>- Nội tiết, dinh dưỡng:</strong> {record.khamNoiTietDinhDuong}</div>
+                </div>
+
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>IV. KHÁM BỆNH Y HỌC CỔ TRUYỀN (Tứ Chẩn)</h3>
+                <p><strong>1. Vọng chẩn:</strong></p>
+                <div style={{paddingLeft: '10px'}}>
+                    <p>{[
+                        record.vongHinhThai.length > 0 ? `Hình thái: ${record.vongHinhThai.join(', ')}` : '',
+                        record.vongThan.length > 0 ? `Thần: ${record.vongThan.join(', ')}` : '',
+                        record.vongSac.length > 0 ? `Sắc: ${record.vongSac.join(', ')}` : '',
+                        record.vongTrach.length > 0 ? `Trạch: ${record.vongTrach.join(', ')}` : ''
+                    ].filter(Boolean).join('. ')}</p>
+                    <p>Lưỡi: {[
+                        record.luoiHinhThai.length > 0 ? `Hình thái: ${record.luoiHinhThai.join(', ')}` : '',
+                        record.luoiChat.length > 0 ? `Chất/Sắc lưỡi: ${record.luoiChat.join(', ')}` : '',
+                        record.luoiReu.length > 0 ? `Rêu lưỡi: ${record.luoiReu.join(', ')}` : ''
+                    ].filter(Boolean).join('. ')}</p>
+                    {record.vongMoTaKhac && <p>Khác: {record.vongMoTaKhac}</p>}
+                </div>
+
+                <p><strong>2. Văn chẩn:</strong></p>
+                <div style={{paddingLeft: '10px'}}>
+                    <p>{[
+                        record.vanTiengNoi.length > 0 ? `Tiếng nói: ${record.vanTiengNoi.join(', ')}` : '',
+                        record.vanHoiTho.length > 0 ? `Hơi thở: ${record.vanHoiTho.join(', ')}` : '',
+                        record.vanHo.length > 0 ? `Ho: ${record.vanHo.join(', ')}` : '',
+                        record.vanNac.length > 0 ? `Nấc: ${record.vanNac.join(', ')}` : '',
+                        record.vanMuiCoThe.length > 0 ? `Mùi cơ thể/hơi thở: ${record.vanMuiCoThe.join(', ')}` : '',
+                        record.vanChatThai.length > 0 ? `Chất thải biểu hiện bệnh: ${record.vanChatThai.join(', ')}` : ''
+                    ].filter(Boolean).join('. ')}</p>
+                    {record.vanMoTaKhac && <p>Khác: {record.vanMoTaKhac}</p>}
+                </div>
+
+                <p><strong>3. Vấn chẩn:</strong></p>
+                <div style={{paddingLeft: '10px'}}>
+                    <p>{[
+                        record.vanHanNhiet.length > 0 ? `Hàn nhiệt: ${record.vanHanNhiet.join(', ')}` : '',
+                        record.vanMoHoi.length > 0 ? `Mồ hôi: ${record.vanMoHoi.join(', ')}` : '',
+                        record.vanDauDau.length > 0 ? `Đau đầu: ${record.vanDauDau.join(', ')}` : '',
+                        record.vanHoaMat.length > 0 ? `Hoa mắt chóng mặt: ${record.vanHoaMat.join(', ')}` : '',
+                        record.vanMat.length > 0 ? `Mắt: ${record.vanMat.join(', ')}` : '',
+                        record.vanTai.length > 0 ? `Tai: ${record.vanTai.join(', ')}` : '',
+                        record.vanMui.length > 0 ? `Mũi: ${record.vanMui.join(', ')}` : '',
+                        record.vanHong.length > 0 ? `Họng: ${record.vanHong.join(', ')}` : '',
+                        record.vanCoVai.length > 0 ? `Cổ vai: ${record.vanCoVai.join(', ')}` : '',
+                        record.vanLung.length > 0 ? `Lưng: ${record.vanLung.join(', ')}` : '',
+                        record.vanNguc.length > 0 ? `Ngực: ${record.vanNguc.join(', ')}` : '',
+                        record.vanBung.length > 0 ? `Bụng: ${record.vanBung.join(', ')}` : '',
+                        record.vanChanTay.length > 0 ? `Chân tay: ${record.vanChanTay.join(', ')}` : '',
+                        record.vanAn.length > 0 ? `Ăn: ${record.vanAn.join(', ')}` : '',
+                        record.vanUong.length > 0 ? `Uống: ${record.vanUong.join(', ')}` : '',
+                        record.vanTieuTien.length > 0 ? `Tiểu tiện: ${record.vanTieuTien.join(', ')}` : '',
+                        record.vanDaiTien.length > 0 ? `Đại tiện: ${record.vanDaiTien.join(', ')}` : '',
+                        record.vanNgu.length > 0 ? `Ngủ: ${record.vanNgu.join(', ')}` : '',
+                        record.vanSinhDucNam.length > 0 ? `Sinh dục (Nam): ${record.vanSinhDucNam.join(', ')}` : '',
+                        record.vanSinhDucNu.length > 0 ? `Sinh sản (Nữ): ${record.vanSinhDucNu.join(', ')}` : '',
+                        record.vanKinhNguyet.length > 0 ? `Kinh nguyệt: ${record.vanKinhNguyet.join(', ')}` : '',
+                        record.vanThongKinh.length > 0 ? `Thống kinh: ${record.vanThongKinh.join(', ')}` : '',
+                        record.vanDoiHa.length > 0 ? `Đới hạ: ${record.vanDoiHa.join(', ')}` : '',
+                        record.vanYeuToLienQuan.length > 0 ? `Yếu tố liên quan: ${record.vanYeuToLienQuan.join(', ')}` : ''
+                    ].filter(Boolean).join('. ')}</p>
+                    {record.vanDapMoTaKhac && <p>Khác: {record.vanDapMoTaKhac}</p>}
+                </div>
+
+                <p><strong>4. Thiết chẩn:</strong></p>
+                <div style={{paddingLeft: '10px'}}>
+                    <p>Xúc chẩn: {[
+                        record.thietDa.length > 0 ? `Da: ${record.thietDa.join(', ')}` : '',
+                        record.thietCoXuongKhop.length > 0 ? `Cơ xương khớp: ${record.thietCoXuongKhop.join(', ')}` : '',
+                        record.thietBung.length > 0 ? `Bụng: ${record.thietBung.join(', ')}` : '',
+                        record.thietMoHoi.length > 0 ? `Mồ hôi: ${record.thietMoHoi.join(', ')}` : ''
+                    ].filter(Boolean).join('. ')}</p>
+                    <p>Mạch chẩn: {record.machChan.join(', ')}</p>
+                    {(record.machTongKhanPhai || record.machTongKhanTrai) && (
+                        <p>Tổng khán: {record.machTongKhanPhai ? `Phải (${record.machTongKhanPhai}) ` : ''}{record.machTongKhanTrai ? `Trái (${record.machTongKhanTrai})` : ''}</p>
+                    )}
+                    <p>Vi khán (Trái): {record.machTraiThon ? `Thốn: ${record.machTraiThon} |` : ''} {record.machTraiQuan ? `Quan: ${record.machTraiQuan} |` : ''} {record.machTraiXich ? `Xích: ${record.machTraiXich}` : ''}</p>
+                    <p>Vi khán (Phải): {record.machPhaiThon ? `Thốn: ${record.machPhaiThon} |` : ''} {record.machPhaiQuan ? `Quan: ${record.machPhaiQuan} |` : ''} {record.machPhaiXich ? `Xích: ${record.machPhaiXich}` : ''}</p>
+                    {record.thietMoTaKhac && <p>Khác: {record.thietMoTaKhac}</p>}
+                </div>
+
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>V. CHẨN ĐOÁN</h3>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>1. Tóm tắt bệnh án:</strong><br/>{record.tomTatBenhAn}</p>
+                <p><strong><em>Kết quả Cận lâm sàng:</em></strong></p>
+                {record.clsItems && record.clsItems.length > 0 ? (
+                    <ul style={{listStyleType: 'none', paddingLeft: '10px', marginBottom: '10px'}}>
+                        {record.clsItems.map((item, idx) => (
+                            <li key={idx} style={{marginBottom: '12px', pageBreakInside: 'avoid'}}>
+                                <strong>- {item.name}:</strong> <span style={{whiteSpace: 'pre-wrap'}}>{item.result}</span>
+                                {item.imageUrl && (
+                                    <div style={{marginTop: '6px'}}>
+                                        <img src={item.imageUrl} alt="Kết quả CLS" width="76" height="76" style={{width: '76px', height: '76px', objectFit: 'contain', border: '1px solid #e2e8f0', borderRadius: '4px'}} />
+                                    </div>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p style={{whiteSpace: 'pre-wrap', paddingLeft: '10px'}}>{record.clsChiDinh}</p>
+                )}
+                <p><strong>2. Chẩn đoán YHHĐ:</strong></p>
+                <ul style={{listStyleType: 'none', paddingLeft: '10px'}}>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Bệnh chính: {record.cdYhhdBenhChinh} (ICD-10: {record.cdYhhhdMa})</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Bệnh kèm theo: {record.cdYhhdBenhKem}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Chẩn đoán phân biệt: {record.cdPhanBiet}</li>
+                </ul>
+                <p><strong>3. Chẩn đoán YHCT:</strong></p>
+                <ul style={{listStyleType: 'none', paddingLeft: '10px'}}>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Tóm tắt tứ chẩn: {record.tomTatTuChan}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Biện chứng luận trị: {record.bienChungLuanTri}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Bệnh danh: {record.cdYhctBenhChinh}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Bệnh kèm theo: {record.cdYhctBenhKem}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Bát cương: {record.batCuong.join(', ')}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Tạng phủ: {record.tangPhu.join(', ')}</li>
+                    <li style={{whiteSpace: 'pre-wrap', marginBottom: '6px'}}>- Nguyên nhân: {record.nguyenNhan.join(', ')}</li>
+                </ul>
+
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>VI. ĐIỀU TRỊ</h3>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>1. Điều trị YHHĐ:</strong> Hướng ({record.huongDieuTriYhhd})</p>
+                <div style={{paddingLeft: '10px', whiteSpace: 'pre-wrap'}}>{record.dieuTriCuTheYhhd}</div>
+                <p style={{paddingLeft: '10px', whiteSpace: 'pre-wrap'}}>VLTL/PHCN: {record.vltlPhcn}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>2. Điều trị YHCT:</strong> Pháp trị ({record.phapDieuTri})</p>
+                <div style={{paddingLeft: '10px', whiteSpace: 'pre-wrap'}}>{record.phuongDuoc}</div>
+                <p style={{paddingLeft: '10px', whiteSpace: 'pre-wrap'}}>Kỹ thuật khác: {record.phuongPhapKhac}</p>
+                
+                <h3 style={{fontSize: '16px', fontWeight: 'bold', borderBottom: '1px solid black', paddingBottom: '4px', marginTop: '16px'}}>VII. TIÊN LƯỢNG & DỰ PHÒNG</h3>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>Tiên lượng YHHĐ:</strong> {record.tienLuongYhhd}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>Dự phòng:</strong> {record.duPhongYhhd}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>Tiên lượng YHCT:</strong> {record.tienLuongYhct}</p>
+                <p style={{whiteSpace: 'pre-wrap'}}><strong>Dự hậu:</strong> {record.duHauYhct}</p>
+
+                <div style={{marginTop: '40px', display: 'flex', justifyContent: 'flex-end', paddingRight: '40px'}}>
+                    <div style={{textAlign: 'center'}}>
+                        <p><em>Ngày ..... tháng ..... năm ........</em></p>
+                        <p><strong>Bác sĩ điều trị</strong></p>
+                        <br/><br/><br/><br/>
+                        <p>.......................................</p>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // --- ỨNG DỤNG CHÍNH ---
+        function App() {
+            const [activeTab, setActiveTab] = useState('hanhChinh');
+            const [record, setRecord] = useState(initialRecordState);
+            const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
+            const [isExportingPDF, setIsExportingPDF] = useState(false);
+            const saveMenuRef = useRef(null);
+
+            // Các State phục vụ việc Quản lý nhiều bệnh án & Lưu tạm
+            const [savedRecords, setSavedRecords] = useState(() => {
+                try {
+                    const stored = localStorage.getItem('yhct_records');
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        return Array.isArray(parsed) ? parsed : [];
+                    }
+                    return [];
+                } catch (e) {
+                    console.error("Data load error:", e);
+                    return [];
+                }
+            });
+            const [currentRecordId, setCurrentRecordId] = useState(null);
+            const [isListMenuOpen, setIsListMenuOpen] = useState(false);
+            const listMenuRef = useRef(null);
+            const [toastMessage, setToastMessage] = useState('');
+            const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+
+            // State phục vụ Tủ thuốc cá nhân
+            const [customRemedies, setCustomRemedies] = useState(() => {
+                try {
+                    const stored = localStorage.getItem('yhct_custom_remedies');
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        return Array.isArray(parsed) ? parsed : [];
+                    }
+                    return [];
+                } catch (e) {
+                    console.error("Data load error:", e);
+                    return [];
+                }
+            });
+            const [isCustomRemedyModalOpen, setIsCustomRemedyModalOpen] = useState(false);
+            const [newRemedy, setNewRemedy] = useState({ name: '', phapTri: '', congThuc: '', thuThuat: '' });
+
+            // Lưu vào bộ nhớ máy mỗi khi danh sách có sự thay đổi
+            useEffect(() => {
+                try {
+                    localStorage.setItem('yhct_records', JSON.stringify(savedRecords));
+                } catch (error) {
+                    setToastMessage('Lỗi: Bộ nhớ đầy! Hãy xóa bớt bệnh án cũ hoặc ảnh Cận lâm sàng.');
+                    setTimeout(() => setToastMessage(''), 5000);
+                }
+            }, [savedRecords]);
+
+            // Lưu Tủ thuốc cá nhân
+            useEffect(() => {
+                try {
+                    localStorage.setItem('yhct_custom_remedies', JSON.stringify(customRemedies));
+                } catch (error) {
+                    console.error("Local storage error:", error);
+                }
+            }, [customRemedies]);
+
+            // Đóng menu danh sách bệnh án khi click ngoài
+            useEffect(() => {
+                const handleClickOutsideList = (event) => {
+                    if (listMenuRef.current && !listMenuRef.current.contains(event.target)) {
+                        setIsListMenuOpen(false);
+                    }
+                };
+                document.addEventListener("mousedown", handleClickOutsideList);
+                return () => document.removeEventListener("mousedown", handleClickOutsideList);
+            }, [listMenuRef]);
+
+            const handleChange = (field, value) => {
+                setRecord(prev => ({ ...prev, [field]: value }));
+            };
+
+            // Hàm tạo mới bệnh án
+            const handleNewRecord = () => {
+                setModalConfig({
+                    isOpen: true,
+                    title: 'Làm mới Bệnh án',
+                    message: 'Bạn có chắc chắn muốn làm mới? Các dữ liệu chưa được "Lưu tạm" trên màn hình sẽ bị xóa.',
+                    onConfirm: () => {
+                        setRecord(initialRecordState);
+                        setCurrentRecordId(null);
+                        setActiveTab('hanhChinh');
+                    }
+                });
+            };
+
+            // Hàm lưu tạm bệnh án
+            const handleSaveDraft = () => {
+                const timestamp = new Date().toLocaleString('vi-VN');
+                
+                if (currentRecordId) {
+                    // Cập nhật bệnh án đang mở
+                    setSavedRecords(prev => prev.map(r => r.id === currentRecordId ? { ...record, id: currentRecordId, updatedAt: timestamp } : r));
+                } else {
+                    // Thêm mới
+                    const newId = Date.now().toString();
+                    const newRecord = { ...record, id: newId, updatedAt: timestamp };
+                    setSavedRecords(prev => [...prev, newRecord]);
+                    setCurrentRecordId(newId);
+                }
+                
+                setToastMessage('Đã lưu bệnh án vào danh sách tạm!');
+                setTimeout(() => setToastMessage(''), 3000);
+            };
+
+            // Hàm chọn bệnh án để chỉnh sửa
+            const handleEditRecord = (rec) => {
+                const safeRecord = { ...initialRecordState, ...rec }; // Đảm bảo dữ liệu cũ bị khuyết thuộc tính sẽ tự động bù đắp, ngăn lỗi trắng màn
+                setRecord(safeRecord);
+                setCurrentRecordId(rec.id);
+                setIsListMenuOpen(false);
+                setActiveTab('hanhChinh'); // Tự động chuyển về tab Hành chính để người dùng nhận diện ngay
+                setToastMessage(`Đã mở bệnh án: ${rec.hoTen || 'Chưa có tên'}`);
+                setTimeout(() => setToastMessage(''), 3000);
+            };
+
+            // Hàm xóa bệnh án
+            const confirmDeleteRecord = (e, id) => {
+                e.stopPropagation(); // Tránh sự kiện kích hoạt vào thẻ cha (Mở chỉnh sửa)
+                setModalConfig({
+                    isOpen: true,
+                    title: 'Xóa Bệnh án lưu tạm',
+                    message: 'Bạn có chắc chắn muốn xóa vĩnh viễn bệnh án này khỏi danh sách?',
+                    onConfirm: () => {
+                        setSavedRecords(prev => prev.filter(r => r.id !== id));
+                        if (currentRecordId === id) {
+                            setRecord(initialRecordState);
+                            setCurrentRecordId(null);
+                        }
+                        setToastMessage('Đã xóa bệnh án!');
+                        setTimeout(() => setToastMessage(''), 3000);
+                    }
+                });
+            };
+
+            // Đóng menu lưu khi click ngoài
+            useEffect(() => {
+                const handleClickOutside = (event) => {
+                    if (saveMenuRef.current && !saveMenuRef.current.contains(event.target)) {
+                        setIsSaveMenuOpen(false);
+                    }
+                };
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => document.removeEventListener("mousedown", handleClickOutside);
+            }, [saveMenuRef]);
+
+            useEffect(() => {
+                if (record.ngaySinh) {
+                    const birthDate = new Date(record.ngaySinh);
+                    const today = new Date();
+                    let age = today.getFullYear() - birthDate.getFullYear();
+                    const m = today.getMonth() - birthDate.getMonth();
+                    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                        age--;
+                    }
+                    if (age >= 0 && age.toString() !== record.tuoi) {
+                        setRecord(prev => ({ ...prev, tuoi: age.toString() }));
+                    }
+                }
+            }, [record.ngaySinh]);
+
+            useEffect(() => {
+                if (record.canNang && record.chieuCao) {
+                    const weight = parseFloat(record.canNang);
+                    const heightInMeters = parseFloat(record.chieuCao) / 100;
+                    if (weight > 0 && heightInMeters > 0) {
+                        const bmiValue = (weight / (heightInMeters * heightInMeters)).toFixed(2);
+                        if (bmiValue !== record.bmi) {
+                            setRecord(prev => ({ ...prev, bmi: bmiValue }));
+                        }
+                    }
+                } else if (record.bmi !== '') {
+                    setRecord(prev => ({ ...prev, bmi: '' }));
+                }
+            }, [record.canNang, record.chieuCao]);
+
+            // --- XỬ LÝ XUẤT FILE ---
+            // Hàm hỗ trợ lưu file dùng Web Share API cho thiết bị di động (APK)
+            const saveOrShareFile = async (blob, filename) => {
+                if (navigator.share && navigator.canShare) {
+                    const file = new File([blob], filename, { type: blob.type });
+                    if (navigator.canShare({ files: [file] })) {
+                        try {
+                            await navigator.share({
+                                files: [file],
+                                title: filename,
+                            });
+                            return; // Thành công gọi hộp thoại Share/Lưu của Android
+                        } catch (error) {
+                            console.log('Share bị hủy hoặc lỗi', error);
+                        }
+                    }
+                }
+                
+                // Fallback cho trình duyệt web trên máy tính
+                const url = URL.createObjectURL(blob);
+                const fileDownload = document.createElement("a");
+                document.body.appendChild(fileDownload);
+                fileDownload.href = url;
+                fileDownload.download = filename;
+                fileDownload.click();
+                setTimeout(() => {
+                    document.body.removeChild(fileDownload);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            };
+
+            const handlePrint = () => {
+                try {
+                    window.print();
+                } catch (e) {
+                    setModalConfig({
+                        isOpen: true,
+                        title: 'Thông báo',
+                        message: 'Tính năng in trực tiếp không được hỗ trợ trên thiết bị này. Vui lòng xuất file PDF để in.',
+                        onConfirm: () => {}
+                    });
+                }
+            };
+
+            const exportToWord = () => {
+                setIsSaveMenuOpen(false);
+                const element = document.getElementById("printable-area");
+                const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Benh An</title><style>body { font-family: 'Times New Roman', serif; line-height: 1.6; } h3 { border-bottom: 1px solid black; padding-bottom: 4px; }</style></head><body>";
+                const footer = "</body></html>";
+                const sourceHTML = header + element.innerHTML + footer;
+                
+                const blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
+                const filename = 'Benh_An_' + (record.hoTen || 'YHCT').replace(/\s+/g, '_') + '.doc';
+                
+                saveOrShareFile(blob, filename);
+            };
+
+            const exportToPDF = () => {
+                setIsExportingPDF(true);
+                setIsSaveMenuOpen(false);
+                const element = document.getElementById('printable-area');
+                const originalCssText = element.style.cssText;
+                element.style.cssText = "position: absolute; left: 0; top: 0; width: 210mm; background: white; padding: 20mm; z-index: -9999; color: black; font-family: 'Times New Roman', serif;";
+                
+                // Giảm scale xuống 1.5 để tránh tràn bộ nhớ (Out of Memory) gây văng app trên điện thoại
+                const opt = {
+                    margin:       10,
+                    filename:     'Benh_An_' + (record.hoTen || 'YHCT').replace(/\s+/g, '_') + '.pdf',
+                    image:        { type: 'jpeg', quality: 0.98 },
+                    html2canvas:  { scale: 1.5, useCORS: true, logging: false },
+                    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+                
+                // Sử dụng output('blob') thay vì .save() để tương thích với APK
+                html2pdf().set(opt).from(element).output('blob').then((pdfBlob) => {
+                    element.style.cssText = originalCssText;
+                    saveOrShareFile(pdfBlob, opt.filename).then(() => {
+                        setIsExportingPDF(false);
+                    });
+                }).catch(err => {
+                    console.error("PDF Export error:", err);
+                    element.style.cssText = originalCssText;
+                    setIsExportingPDF(false);
+                    setModalConfig({
+                        isOpen: true,
+                        title: 'Lỗi xuất PDF',
+                        message: 'Trình duyệt hoặc ứng dụng không đủ bộ nhớ để xử lý xuất PDF.',
+                        onConfirm: () => {}
+                    });
+                });
+            };
+
+            const renderHanhChinh = () => (
+                <div className="space-y-6 animate-fadeIn">
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+                    <h3 className="text-lg font-bold text-blue-800 mb-4 border-b pb-2">I. Thông tin Hành chính</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Input label="1. Họ và tên (In hoa)" value={record.hoTen} onChange={(e) => handleChange('hoTen', e.target.value.toUpperCase())} />
+                    <Input label="2. Ngày sinh" type="date" value={record.ngaySinh} onChange={(e) => handleChange('ngaySinh', e.target.value)} />
+                    <Input label="Tuổi (Tự động tính)" value={record.tuoi} onChange={() => {}} className="opacity-70 bg-gray-50 pointer-events-none" />
+                    
+                    <div className="flex flex-col space-y-1">
+                        <label className="text-sm font-semibold text-slate-700">3. Giới tính</label>
+                        <select value={record.gioiTinh} onChange={(e) => handleChange('gioiTinh', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-md text-sm bg-white">
+                        <option value="1">Nam</option>
+                        <option value="2">Nữ</option>
+                        </select>
+                    </div>
+                    <Input label="4. Nghề nghiệp" value={record.ngheNghiep} onChange={(e) => handleChange('ngheNghiep', e.target.value)} />
+                    <Input label="5. Dân tộc" value={record.danToc} onChange={(e) => handleChange('danToc', e.target.value)} />
+                    
+                    <div className="md:col-span-3">
+                        <Input label="7. Địa chỉ hiện tại" value={record.diaChi} onChange={(e) => handleChange('diaChi', e.target.value)} placeholder="Số nhà, Thôn/Phố, Xã/Phường, Quận/Huyện, Tỉnh/TP" />
+                    </div>
+                    
+                    <div className="flex flex-col space-y-1">
+                        <label className="text-sm font-semibold text-slate-700">9. Đối tượng</label>
+                        <select value={record.doiTuong} onChange={(e) => handleChange('doiTuong', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-md text-sm bg-white">
+                        <option value="1">BHYT</option>
+                        <option value="2">Thu phí</option>
+                        <option value="3">Miễn</option>
+                        <option value="4">Khác</option>
+                        </select>
+                    </div>
+                    <Input label="10. Số thẻ BHYT" value={record.soBHYT} onChange={(e) => handleChange('soBHYT', e.target.value)} />
+                    <Input label="BHYT Giá trị đến ngày" type="date" value={record.bhytDenNgay} onChange={(e) => handleChange('bhytDenNgay', e.target.value)} />
+                    
+                    <div className="md:col-span-2">
+                        <Input label="11. Người nhà khi cần báo tin" value={record.nguoiNha} onChange={(e) => handleChange('nguoiNha', e.target.value)} />
+                    </div>
+                    <Input label="Số điện thoại" value={record.dienThoai} onChange={(e) => handleChange('dienThoai', e.target.value)} />
+                    </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 mt-6">
+                    <h3 className="text-lg font-bold text-blue-800 mb-4 border-b pb-2">II. Thông tin Nhập viện & Bệnh án</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="flex flex-col space-y-2">
+                        <label className="text-sm font-semibold text-slate-700">1. Thời gian vào viện</label>
+                        <input 
+                            type="datetime-local" 
+                            lang="en-GB"
+                            value={(record.vaoVienNgay && record.vaoVienGio) ? `${record.vaoVienNgay}T${record.vaoVienGio}` : ''} 
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val) {
+                                    const [d, t] = val.split('T');
+                                    setRecord(prev => ({ ...prev, vaoVienNgay: d, vaoVienGio: t }));
+                                } else {
+                                    setRecord(prev => ({ ...prev, vaoVienNgay: '', vaoVienGio: '' }));
+                                }
+                            }} 
+                            className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-full" 
+                        />
+                    </div>
+                    <div className="flex flex-col space-y-2">
+                        <label className="text-sm font-semibold text-slate-700">2. Thời gian làm bệnh án</label>
+                        <input 
+                            type="datetime-local" 
+                            lang="en-GB"
+                            value={(record.ngayLamBenhAn && record.gioLamBenhAn) ? `${record.ngayLamBenhAn}T${record.gioLamBenhAn}` : ''} 
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val) {
+                                    const [d, t] = val.split('T');
+                                    setRecord(prev => ({ ...prev, ngayLamBenhAn: d, gioLamBenhAn: t }));
+                                } else {
+                                    setRecord(prev => ({ ...prev, ngayLamBenhAn: '', gioLamBenhAn: '' }));
+                                }
+                            }} 
+                            className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-full" 
+                        />
+                    </div>
+                    </div>
+                </div>
+                </div>
+            );
+
+            const renderKhamBenh = () => (
+                <div className="space-y-6 animate-fadeIn">
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+                    <h3 className="text-lg font-bold text-blue-800 mb-4 border-b pb-2 flex items-center"><Icon name="Activity" size={20} className="mr-2"/> Lý do & Bệnh sử</h3>
+                    <TextArea label="Lý do vào viện" value={record.trieuChung} onChange={(e) => handleChange('trieuChung', e.target.value)} rows={2} />
+                    <TextArea label="Bệnh sử" value={record.benhSu} onChange={(e) => handleChange('benhSu', e.target.value)} rows={4} className="mt-4" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <TextArea label="Tiền sử bản thân" value={record.tienSuBanThan} onChange={(e) => handleChange('tienSuBanThan', e.target.value)} rows={2} />
+                    <TextArea label="Tiền sử gia đình" value={record.tienSuGiaDinh} onChange={(e) => handleChange('tienSuGiaDinh', e.target.value)} rows={2} />
+                    </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+                    <h3 className="text-lg font-bold text-blue-800 mb-4 border-b pb-2 flex items-center"><Icon name="Stethoscope" size={20} className="mr-2"/> Khám bộ phận (YHHĐ)</h3>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6 bg-slate-50 p-4 rounded-md border border-slate-100">
+                    <Input label="Mạch (l/p)" value={record.mach} onChange={(e) => handleChange('mach', e.target.value)} />
+                    <Input label="Nhiệt độ (°C)" value={record.nhietDo} onChange={(e) => handleChange('nhietDo', e.target.value)} />
+                    <Input label="Huyết áp (mmHg)" value={record.huyetAp} onChange={(e) => handleChange('huyetAp', e.target.value)} />
+                    <Input label="Nhịp thở (l/p)" value={record.nhipTho} onChange={(e) => handleChange('nhipTho', e.target.value)} />
+                    <Input label="Cân nặng (kg)" value={record.canNang} onChange={(e) => handleChange('canNang', e.target.value)} />
+                    <Input label="Chiều cao (cm)" value={record.chieuCao} onChange={(e) => handleChange('chieuCao', e.target.value)} />
+                    </div>
+                    <div className="mb-6 w-full md:w-1/3">
+                    <Input label="BMI (Tự động)" value={record.bmi} onChange={() => {}} className="opacity-70 bg-gray-50 pointer-events-none" />
+                    </div>
+
+                    <div className="space-y-4">
+                    <TextArea label="1. Toàn thân (Ý thức, da niêm mạc, tuyến giáp...)" value={record.khamToanThan} onChange={(e) => handleChange('khamToanThan', e.target.value)} rows={2} />
+                    <TextArea label="2. Tuần hoàn" value={record.khamTuanHoan} onChange={(e) => handleChange('khamTuanHoan', e.target.value)} rows={2} />
+                    <TextArea label="3. Hô hấp" value={record.khamHoHap} onChange={(e) => handleChange('khamHoHap', e.target.value)} rows={2} />
+                    <TextArea label="4. Tiêu hóa" value={record.khamTieuHoa} onChange={(e) => handleChange('khamTieuHoa', e.target.value)} rows={2} />
+                    <TextArea label="5. Thận - Tiết niệu - Sinh dục" value={record.khamThanTietNieuSinhDuc} onChange={(e) => handleChange('khamThanTietNieuSinhDuc', e.target.value)} rows={2} />
+                    <TextArea label="6. Thần kinh" value={record.khamThanKinh} onChange={(e) => handleChange('khamThanKinh', e.target.value)} rows={2} />
+                    <TextArea label="7. Cơ xương khớp" value={record.khamCoXuongKhop} onChange={(e) => handleChange('khamCoXuongKhop', e.target.value)} rows={2} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <TextArea label="8. Tai - Mũi - Họng" value={record.khamTaiMuiHong} onChange={(e) => handleChange('khamTaiMuiHong', e.target.value)} rows={2} />
+                        <TextArea label="9. Răng - Hàm - Mặt" value={record.khamRangHamMat} onChange={(e) => handleChange('khamRangHamMat', e.target.value)} rows={2} />
+                        <TextArea label="10. Mắt" value={record.khamMat} onChange={(e) => handleChange('khamMat', e.target.value)} rows={2} />
+                        <TextArea label="11. Nội tiết, dinh dưỡng" value={record.khamNoiTietDinhDuong} onChange={(e) => handleChange('khamNoiTietDinhDuong', e.target.value)} rows={2} />
+                    </div>
+                    </div>
+                </div>
+                </div>
+            );
+
+            const renderCLS_YHHĐ = () => {
+                const toggleCLS = (cls) => {
+                    const exists = record.clsItems && record.clsItems.find(item => item.name === cls);
+                    if (exists) {
+                        handleChange('clsItems', record.clsItems.filter(item => item.name !== cls));
+                    } else {
+                        const newItem = { id: Date.now() + Math.random(), name: cls, result: '', imageUrl: '' };
+                        handleChange('clsItems', [...(record.clsItems || []), newItem]);
+                    }
+                };
+
+                const handleClsItemChange = (id, field, value) => {
+                    const newItems = record.clsItems.map(item => 
+                        item.id === id ? { ...item, [field]: value } : item
+                    );
+                    handleChange('clsItems', newItems);
+                };
+
+                // FIX LỖI BASE64: Nén ảnh qua Canvas trước khi lưu vào State -> localStorage
+                const handleClsImageUpload = (id, e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        if (file.size > 15 * 1024 * 1024) {
+                            alert("Kích thước ảnh quá lớn. Vui lòng chọn ảnh nhỏ hơn 15MB để tránh quá tải bộ nhớ.");
+                            return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            const img = new Image();
+                            img.onload = () => {
+                                try {
+                                    const canvas = document.createElement('canvas');
+                                    const MAX_WIDTH = 800; // Giới hạn chiều rộng ảnh
+                                    let scaleSize = 1;
+                                    
+                                    if (img.width > MAX_WIDTH) {
+                                        scaleSize = MAX_WIDTH / img.width;
+                                    }
+                                    
+                                    canvas.width = img.width * scaleSize;
+                                    canvas.height = img.height * scaleSize;
+                                    
+                                    const ctx = canvas.getContext('2d');
+                                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                                    
+                                    // Nén dưới dạng JPEG với chất lượng 60%
+                                    const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+                                    handleClsItemChange(id, 'imageUrl', compressedBase64);
+                                } catch (error) {
+                                    console.error("Lỗi nén ảnh", error);
+                                } finally {
+                                    img.src = ''; // Giúp WebView giải phóng rác RAM nhanh hơn
+                                }
+                            }
+                            img.onerror = () => console.error("Lỗi đọc ảnh");
+                            img.src = event.target.result;
+                        };
+                        reader.onerror = () => console.error("Lỗi đọc file");
+                        reader.readAsDataURL(file);
+                    }
+                };
+
+                const handleCustomCLSAdd = () => {
+                    const input = document.getElementById('customClsInput');
+                    if (input && input.value.trim()) {
+                        toggleCLS(input.value.trim());
+                        input.value = '';
+                    }
+                };
+
+                const handleDiseaseSelect = (selected) => {
+                    if (selected && selected.ma !== '') {
+                        setRecord(prev => ({ ...prev, cdYhhdBenhChinh: selected.yhhhd, cdYhhhdMa: selected.ma }));
+                    }
+                };
+
+                const addMedicine = (selected) => {
+                    if (!selected) return;
+                    const newLine = `- ${selected.name} x ${selected.dose}`;
+                    setRecord(prev => ({ ...prev, dieuTriCuTheYhhd: prev.dieuTriCuTheYhhd ? prev.dieuTriCuTheYhhd + '\n' + newLine : newLine }));
+                };
+
+                return (
+                    <div className="space-y-6 animate-fadeIn">
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-blue-200">
+                        <h3 className="text-lg font-bold text-blue-800 mb-4 border-b border-blue-100 pb-2 flex items-center"><Icon name="FlaskConical" size={20} className="mr-2"/> Cận Lâm Sàng & Tóm Tắt</h3>
+                        <div className="mb-4">
+                            <label className="text-sm font-semibold text-slate-700 block mb-2">Chỉ định Cận lâm sàng nhanh:</label>
+                            <div className="flex flex-wrap gap-2 mb-3">
+                            {CLS_PRESETS.map((cls, idx) => (
+                                <button
+                                key={idx}
+                                onClick={() => toggleCLS(cls)}
+                                className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                                    (record.clsItems || []).some(item => item.name === cls) ? 'bg-blue-100 border-blue-400 text-blue-800 font-medium' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                                }`}
+                                >
+                                {(record.clsItems || []).some(item => item.name === cls) ? <Icon name="Check" size={12} className="inline mr-1" /> : <Icon name="Plus" size={12} className="inline mr-1" />}
+                                {cls.split(' (')[0]}
+                                </button>
+                            ))}
+                            </div>
+                            <div className="flex space-x-2 md:w-1/2">
+                                <input id="customClsInput" type="text" placeholder="Thêm chỉ định khác (không có trong danh sách)..." className="px-3 py-2 border border-slate-300 rounded-md text-sm flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCustomCLSAdd(); } }}/>
+                                <button type="button" onClick={handleCustomCLSAdd} className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-md hover:bg-blue-100 text-sm font-medium transition-colors">Thêm</button>
+                            </div>
+                        </div>
+                        
+                        {(record.clsItems && record.clsItems.length > 0) && (
+                            <div className="space-y-3 mb-6 bg-blue-50/30 p-4 rounded-lg border border-blue-100">
+                                <label className="text-sm font-bold text-blue-900 block border-b border-blue-200 pb-2">Đánh kết quả & Đính kèm ảnh/QR Code (Đã tự động nén ảnh):</label>
+                                {record.clsItems.map((item, idx) => (
+                                    <div key={item.id} className="bg-white p-4 rounded-md border border-slate-200 shadow-sm flex flex-col space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-sm text-slate-800">{idx + 1}. {item.name}</span>
+                                            <button onClick={() => toggleCLS(item.name)} className="text-red-500 hover:text-red-700 text-xs font-medium bg-red-50 px-2 py-1 rounded">Xóa</button>
+                                        </div>
+                                        <textarea
+                                            value={item.result}
+                                            onChange={(e) => handleClsItemChange(item.id, 'result', e.target.value)}
+                                            rows={2}
+                                            placeholder={`Nhập kết quả ${item.name.split(' (')[0]}...`}
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white resize-y"
+                                        />
+                                        <div className="flex items-center space-x-4">
+                                            <label className="flex items-center cursor-pointer text-sm text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-md border border-blue-100 transition-colors">
+                                                <Icon name="Plus" size={16} className="mr-2" /> Thêm ảnh / QR Code
+                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleClsImageUpload(item.id, e)} />
+                                            </label>
+                                            {item.imageUrl && (
+                                                <div className="relative inline-block mt-2">
+                                                    <img src={item.imageUrl} alt="Preview" width="76" height="76" style={{width: '76px', height: '76px', objectFit: 'contain'}} className="rounded border border-slate-300 shadow-sm" />
+                                                    <button onClick={() => handleClsItemChange(item.id, 'imageUrl', '')} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 shadow">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <TextArea label="Tóm tắt bệnh án" value={record.tomTatBenhAn} onChange={(e) => handleChange('tomTatBenhAn', e.target.value)} rows={4} placeholder="Bệnh nhân nam/nữ, bao nhiêu tuổi, vào viện vì lý do gì. Qua hỏi bệnh và thăm khám phát hiện các hội chứng, triệu chứng sau..." />
+                        </div>
+
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-blue-200">
+                        <h3 className="text-lg font-bold text-blue-800 mb-4 border-b border-blue-100 pb-2">Chẩn Đoán Y Học Hiện Đại</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="border border-blue-300 rounded-md overflow-hidden bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-shadow md:col-span-2">
+                            <div className="bg-blue-50 border-b border-blue-200 p-3">
+                                <h4 className="text-sm font-bold text-blue-900 mb-2">Bệnh chính (YHHĐ) - Điền nhanh:</h4>
+                                <AutocompleteSearch
+                                placeholder="Tra cứu Chẩn đoán (Ví dụ: Đau thần kinh tọa, Mỡ máu, Dạ dày...)"
+                                data={MA_BENH_PRESETS}
+                                onSelect={handleDiseaseSelect}
+                                iconName="Search"
+                                />
+                            </div>
+                            <div className="p-3">
+                                <textarea
+                                value={record.cdYhhdBenhChinh}
+                                onChange={(e) => handleChange('cdYhhdBenhChinh', e.target.value)}
+                                rows={2}
+                                placeholder="Gõ trực tiếp hoặc sử dụng thanh tìm kiếm phía trên để tự động điền bệnh và mã ICD-10..."
+                                className="w-full text-sm focus:outline-none resize-y"
+                                />
+                            </div>
+                            </div>
+                            <Input label="Mã ICD-10" value={record.cdYhhhdMa} onChange={(e) => handleChange('cdYhhhdMa', e.target.value)} />
+                            <TextArea label="Bệnh kèm theo" value={record.cdYhhdBenhKem} onChange={(e) => handleChange('cdYhhdBenhKem', e.target.value)} rows={2} />
+                            <div className="md:col-span-2">
+                            <TextArea label="Chẩn đoán phân biệt" value={record.cdPhanBiet} onChange={(e) => handleChange('cdPhanBiet', e.target.value)} rows={2} placeholder="Phân biệt với các bệnh..." />
+                            </div>
+                        </div>
+                        </div>
+
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-blue-200">
+                        <h3 className="text-lg font-bold text-blue-800 mb-4 border-b border-blue-100 pb-2 flex items-center"><Icon name="Pill" size={20} className="mr-2"/> Điều Trị Y Học Hiện Đại</h3>
+                        <div className="space-y-4">
+                            <Input label="Hướng điều trị" value={record.huongDieuTriYhhd} onChange={(e) => handleChange('huongDieuTriYhhd', e.target.value)} placeholder="Vd: Chống viêm, giảm đau, giãn cơ, kiểm soát huyết áp..." />
+                            
+                            <div className="border border-blue-300 rounded-md overflow-hidden bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-shadow">
+                            <div className="bg-blue-50 border-b border-blue-200 p-3">
+                                <h4 className="text-sm font-bold text-blue-900 mb-2">Điều trị cụ thể (Tích hợp thư viện thuốc):</h4>
+                                <AutocompleteSearch
+                                placeholder="Tra cứu thuốc (Tên thuốc, nhóm bệnh...) và chọn để thêm tự động vào đơn..."
+                                data={THUOC_ARRAY}
+                                onSelect={addMedicine}
+                                iconName="Search"
+                                />
+                            </div>
+                            <div className="p-3">
+                                <textarea
+                                value={record.dieuTriCuTheYhhd}
+                                onChange={(e) => handleChange('dieuTriCuTheYhhd', e.target.value)}
+                                rows={6}
+                                placeholder="Gõ trực tiếp hoặc sử dụng thanh tìm kiếm phía trên để thêm thuốc..."
+                                className="w-full text-sm focus:outline-none resize-y"
+                                />
+                            </div>
+                            </div>
+
+                            <TextArea label="Vật lý trị liệu & Phục hồi chức năng" value={record.vltlPhcn} onChange={(e) => handleChange('vltlPhcn', e.target.value)} rows={3} placeholder="Điện xung, siêu âm trị liệu, kéo giãn cột sống..." />
+                        </div>
+                        </div>
+
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-blue-200">
+                        <h3 className="text-lg font-bold text-blue-800 mb-4 border-b border-blue-100 pb-2">Tiên lượng & Dự phòng</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <TextArea label="Tiên lượng" value={record.tienLuongYhhd || ''} onChange={(e) => handleChange('tienLuongYhhd', e.target.value)} rows={3} placeholder="Tiên lượng gần, tiên lượng xa..." />
+                            <TextArea label="Dự phòng" value={record.duPhongYhhd || ''} onChange={(e) => handleChange('duPhongYhhd', e.target.value)} rows={3} placeholder="Chế độ ăn uống, sinh hoạt, tập luyện..." />
+                        </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderKhamYHCT = () => (
+                <div className="space-y-6 animate-fadeIn">
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                    <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2 flex items-center"><Icon name="Leaf" size={20} className="mr-2"/> I. Vọng Chẩn (Nhìn)</h3>
+                    <CheckboxGroup label="1. Hình thái" options={[{label: 'Gầy', value: 'Gầy'}, {label: 'Béo', value: 'Béo'}, {label: 'Cân đối', value: 'Cân đối'}, {label: 'Nằm co', value: 'Nằm co'}, {label: 'Nằm duỗi', value: 'Nằm duỗi'}, {label: 'Ưa tĩnh', value: 'Ưa tĩnh'}, {label: 'Ưa động', value: 'Ưa động'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vongHinhThai} onChange={(v) => handleChange('vongHinhThai', v)} />
+                    <CheckboxGroup label="2. Thần" options={[{label: 'Còn thần', value: 'Còn thần'}, {label: 'Không còn thần', value: 'Không còn thần'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vongThan} onChange={(v) => handleChange('vongThan', v)} />
+                    <CheckboxGroup label="3. Sắc" options={[{label: 'Bệch (trắng)', value: 'Bệch (trắng)'}, {label: 'Đỏ', value: 'Đỏ'}, {label: 'Vàng', value: 'Vàng'}, {label: 'Xanh', value: 'Xanh'}, {label: 'Đen', value: 'Đen'}, {label: 'Bình thường', value: 'Bình thường'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vongSac} onChange={(v) => handleChange('vongSac', v)} />
+                    <CheckboxGroup label="4. Trạch" options={[{label: 'Tươi nhuận', value: 'Tươi nhuận'}, {label: 'Khô', value: 'Khô'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vongTrach} onChange={(v) => handleChange('vongTrach', v)} />
+                    
+                    <div className="mt-4 p-4 bg-emerald-50 rounded-md border border-emerald-100 mb-4">
+                    <h4 className="font-semibold text-emerald-900 mb-2">5. Khám Lưỡi</h4>
+                    <CheckboxGroup label="- Hình thái lưỡi" options={[{label: 'Bình thường', value: 'Bình thường'}, {label: 'Lệch', value: 'Lệch'}, {label: 'Rụt', value: 'Rụt'}, {label: 'Nứt', value: 'Nứt'}, {label: 'Cứng', value: 'Cứng'}, {label: 'Loét', value: 'Loét'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.luoiHinhThai} onChange={(v) => handleChange('luoiHinhThai', v)} />
+                    <CheckboxGroup label="- Chất lưỡi, sắc lưỡi" options={[{label: 'Đạm', value: 'Đạm'}, {label: 'Bệu', value: 'Bệu'}, {label: 'Gầy mỏng', value: 'Gầy mỏng'}, {label: 'Nứt', value: 'Nứt'}, {label: 'Cứng', value: 'Cứng'}, {label: 'Loét', value: 'Loét'}, {label: 'Hồng', value: 'Hồng'}, {label: 'Nhọt', value: 'Nhọt'}, {label: 'Đỏ', value: 'Đỏ'}, {label: 'Đỏ sẫm', value: 'Đỏ sẫm'}, {label: 'Tím', value: 'Tím'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.luoiChat} onChange={(v) => handleChange('luoiChat', v)} />
+                    <CheckboxGroup label="- Rêu lưỡi" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}, {label: 'Bong', value: 'Bong'}, {label: 'Dầy', value: 'Dầy'}, {label: 'Mỏng', value: 'Mỏng'}, {label: 'Ướt', value: 'Ướt'}, {label: 'Khô', value: 'Khô'}, {label: 'Nhuận', value: 'Nhuận'}, {label: 'Dính', value: 'Dính'}, {label: 'Trắng', value: 'Trắng'}, {label: 'Vàng', value: 'Vàng'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.luoiReu} onChange={(v) => handleChange('luoiReu', v)} />
+                    </div>
+                    <TextArea label="6. Mô tả khác (Vọng chẩn)" value={record.vongMoTaKhac} onChange={(e) => handleChange('vongMoTaKhac', e.target.value)} rows={2} placeholder="Các mô tả chi tiết khác..." />
+                </div>
+
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                    <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">II. Văn Chẩn (Nghe, Ngửi)</h3>
+                    <h4 className="font-semibold text-emerald-900 mb-2">1. Âm thanh</h4>
+                    <div className="bg-slate-50 p-4 rounded border border-slate-100 mb-4">
+                        <CheckboxGroup label="1.1 Tiếng nói" options={[{label: 'Bình thường', value: 'Bình thường'}, {label: 'To', value: 'To'}, {label: 'Nhỏ', value: 'Nhỏ'}, {label: 'Đứt quãng', value: 'Đứt quãng'}, {label: 'Khàn', value: 'Khàn'}, {label: 'Ngọng', value: 'Ngọng'}, {label: 'Mất', value: 'Mất'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanTiengNoi} onChange={(v) => handleChange('vanTiengNoi', v)} />
+                        <CheckboxGroup label="1.2 Hơi thở" options={[{label: 'Bình thường', value: 'Bình thường'}, {label: 'Đứt quãng', value: 'Đứt quãng'}, {label: 'Ngắn', value: 'Ngắn'}, {label: 'Mạnh', value: 'Mạnh'}, {label: 'Yếu', value: 'Yếu'}, {label: 'Thô', value: 'Thô'}, {label: 'Rít', value: 'Rít'}, {label: 'Khò khè', value: 'Khò khè'}, {label: 'Chậm', value: 'Chậm'}, {label: 'Gấp', value: 'Gấp'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanHoiTho} onChange={(v) => handleChange('vanHoiTho', v)} />
+                        <CheckboxGroup label="1.3 Ho" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}, {label: 'Liên tục', value: 'Liên tục'}, {label: 'Cơn', value: 'Cơn'}, {label: 'Ít', value: 'Ít'}, {label: 'Nhiều', value: 'Nhiều'}, {label: 'Khan', value: 'Khan'}, {label: 'Có đờm', value: 'Có đờm'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanHo} onChange={(v) => handleChange('vanHo', v)} />
+                        <CheckboxGroup label="1.4 Nấc" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}]} selectedValues={record.vanNac} onChange={(v) => handleChange('vanNac', v)} />
+                    </div>
+                    
+                    <h4 className="font-semibold text-emerald-900 mb-2">2. Mùi</h4>
+                    <div className="bg-slate-50 p-4 rounded border border-slate-100">
+                        <CheckboxGroup label="2.1 Mùi cơ thể, mùi hơi thở" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}, {label: 'Chua', value: 'Chua'}, {label: 'Khắm', value: 'Khắm'}, {label: 'Tanh', value: 'Tanh'}, {label: 'Thối', value: 'Thối'}, {label: 'Hôi', value: 'Hôi'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanMuiCoThe} onChange={(v) => handleChange('vanMuiCoThe', v)} />
+                        <CheckboxGroup label="2.2 Chất thải biểu hiện bệnh lý" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}, {label: 'Đờm', value: 'Đờm'}, {label: 'Chất nôn', value: 'Chất nôn'}, {label: 'Phân', value: 'Phân'}, {label: 'Nước tiểu', value: 'Nước tiểu'}, {label: 'Khí hư', value: 'Khí hư'}, {label: 'Kinh nguyệt', value: 'Kinh nguyệt'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanChatThai} onChange={(v) => handleChange('vanChatThai', v)} />
+                    </div>
+                    <TextArea label="3. Mô tả khác (Văn chẩn)" value={record.vanMoTaKhac} onChange={(e) => handleChange('vanMoTaKhac', e.target.value)} rows={2} className="mt-4" />
+                </div>
+
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                    <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">III. Vấn Chẩn (Hỏi bệnh)</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        <CheckboxGroup label="1. Hàn nhiệt" options={[{label: 'Thích nóng', value: 'Thích nóng'}, {label: 'Sợ nóng', value: 'Sợ nóng'}, {label: 'Thích mát', value: 'Thích mát'}, {label: 'Sợ lạnh', value: 'Sợ lạnh'}, {label: 'Trong người nóng', value: 'Trong người nóng'}, {label: 'Trong người lạnh', value: 'Trong người lạnh'}, {label: 'Rét run', value: 'Rét run'}, {label: 'Hàn nhiệt vãng lai', value: 'Hàn nhiệt vãng lai'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanHanNhiet} onChange={(v) => handleChange('vanHanNhiet', v)} />
+                        <CheckboxGroup label="2. Mồ hôi" options={[{label: 'Bình thường', value: 'Bình thường'}, {label: 'Không có mồ hôi', value: 'Không có mồ hôi'}, {label: 'Tự hãn', value: 'Tự hãn'}, {label: 'Đạo hãn', value: 'Đạo hãn'}, {label: 'Nhiều', value: 'Nhiều'}, {label: 'Ít', value: 'Ít'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanMoHoi} onChange={(v) => handleChange('vanMoHoi', v)} />
+                        
+                        <div className="md:col-span-2 border-t border-slate-100 pt-4">
+                            <h4 className="font-semibold text-emerald-900 mb-2">3. Đầu mặt cổ</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <CheckboxGroup label="- Đau đầu" options={[{label: 'Một chỗ', value: 'Một chỗ'}, {label: 'Nửa đầu', value: 'Nửa đầu'}, {label: 'Cả đầu', value: 'Cả đầu'}, {label: 'Di chuyển', value: 'Di chuyển'}, {label: 'Ê ẩm', value: 'Ê ẩm'}, {label: 'Nhói', value: 'Nhói'}, {label: 'Căng', value: 'Căng'}, {label: 'Nặng đầu', value: 'Nặng đầu'}, {label: 'Đau thắt', value: 'Đau thắt'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanDauDau} onChange={(v) => handleChange('vanDauDau', v)} />
+                                <div>
+                                    <CheckboxGroup label="- Hoa mắt chóng mặt" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}]} selectedValues={record.vanHoaMat} onChange={(v) => handleChange('vanHoaMat', v)} />
+                                    <CheckboxGroup label="- Mắt" options={[{label: 'Nhìn không rõ', value: 'Nhìn không rõ'}, {label: 'Đau', value: 'Đau'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanMat} onChange={(v) => handleChange('vanMat', v)} />
+                                </div>
+                                <CheckboxGroup label="- Tai" options={[{label: 'Ù', value: 'Ù'}, {label: 'Điếc', value: 'Điếc'}, {label: 'Đau', value: 'Đau'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanTai} onChange={(v) => handleChange('vanTai', v)} />
+                                <CheckboxGroup label="- Mũi" options={[{label: 'Ngạt', value: 'Ngạt'}, {label: 'Chảy nước', value: 'Chảy nước'}, {label: 'Chảy máu cam', value: 'Chảy máu cam'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanMui} onChange={(v) => handleChange('vanMui', v)} />
+                                <CheckboxGroup label="- Họng" options={[{label: 'Đau', value: 'Đau'}, {label: 'Khô', value: 'Khô'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanHong} onChange={(v) => handleChange('vanHong', v)} />
+                                <CheckboxGroup label="- Cổ vai" options={[{label: 'Mỏi', value: 'Mỏi'}, {label: 'Đau', value: 'Đau'}, {label: 'Khó vận động', value: 'Khó vận động'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanCoVai} onChange={(v) => handleChange('vanCoVai', v)} />
+                            </div>
+                        </div>
+
+                        <div className="md:col-span-2 border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <CheckboxGroup label="4. Lưng" options={[{label: 'Mỏi lưng', value: 'Mỏi lưng'}, {label: 'Đau', value: 'Đau'}, {label: 'Khó vận động', value: 'Khó vận động'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanLung} onChange={(v) => handleChange('vanLung', v)} />
+                            <CheckboxGroup label="5. Ngực" options={[{label: 'Tức', value: 'Tức'}, {label: 'Đau', value: 'Đau'}, {label: 'Ngột ngạt khó thở', value: 'Ngột ngạt khó thở'}, {label: 'Đau tức cạnh sườn', value: 'Đau tức cạnh sườn'}, {label: 'Đánh trống ngực', value: 'Đánh trống ngực'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanNguc} onChange={(v) => handleChange('vanNguc', v)} />
+                            <CheckboxGroup label="6. Bụng" options={[{label: 'Đau', value: 'Đau'}, {label: 'Sôi bụng', value: 'Sôi bụng'}, {label: 'Nóng ruột', value: 'Nóng ruột'}, {label: 'Đầy trướng', value: 'Đầy trướng'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanBung} onChange={(v) => handleChange('vanBung', v)} />
+                            <CheckboxGroup label="7. Chân tay" options={[{label: 'Đau', value: 'Đau'}, {label: 'Tê', value: 'Tê'}, {label: 'Buồn', value: 'Buồn'}, {label: 'Mỏi', value: 'Mỏi'}, {label: 'Nhức', value: 'Nhức'}, {label: 'Nóng', value: 'Nóng'}, {label: 'Lạnh', value: 'Lạnh'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanChanTay} onChange={(v) => handleChange('vanChanTay', v)} />
+                            <CheckboxGroup label="8. Ăn" options={[{label: 'Thích nóng', value: 'Thích nóng'}, {label: 'Thích mát', value: 'Thích mát'}, {label: 'Ăn nhiều', value: 'Ăn nhiều'}, {label: 'Ăn ít', value: 'Ăn ít'}, {label: 'Đắng miệng', value: 'Đắng miệng'}, {label: 'Nhạt miệng', value: 'Nhạt miệng'}, {label: 'Thèm ăn', value: 'Thèm ăn'}, {label: 'Chán ăn', value: 'Chán ăn'}, {label: 'Ăn vào bụng chướng', value: 'Ăn vào bụng chướng'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanAn} onChange={(v) => handleChange('vanAn', v)} />
+                            <CheckboxGroup label="9. Uống" options={[{label: 'Thích uống mát', value: 'Thích uống mát'}, {label: 'Thích uống ấm nóng', value: 'Thích uống ấm nóng'}, {label: 'Uống nhiều', value: 'Uống nhiều'}, {label: 'Uống ít', value: 'Uống ít'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanUong} onChange={(v) => handleChange('vanUong', v)} />
+                            
+                            <div className="md:col-span-2">
+                                <h4 className="font-semibold text-emerald-900 mb-2">10. Đại, tiểu tiện</h4>
+                                <CheckboxGroup label="- Tiểu tiện" options={[{label: 'Vàng', value: 'Vàng'}, {label: 'Đỏ', value: 'Đỏ'}, {label: 'Đục', value: 'Đục'}, {label: 'Buốt', value: 'Buốt'}, {label: 'Rắt', value: 'Rắt'}, {label: 'Không tự chủ', value: 'Không tự chủ'}, {label: 'Bí', value: 'Bí'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanTieuTien} onChange={(v) => handleChange('vanTieuTien', v)} />
+                                <CheckboxGroup label="- Đại tiện" options={[{label: 'Táo', value: 'Táo'}, {label: 'Nát', value: 'Nát'}, {label: 'Sống', value: 'Sống'}, {label: 'Lỏng', value: 'Lỏng'}, {label: 'Nhầy mũi', value: 'Nhầy mũi'}, {label: 'Bí', value: 'Bí'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanDaiTien} onChange={(v) => handleChange('vanDaiTien', v)} />
+                            </div>
+
+                            <CheckboxGroup label="11. Ngủ" options={[{label: 'Khó vào giấc ngủ', value: 'Khó vào giấc ngủ'}, {label: 'Hay tỉnh', value: 'Hay tỉnh'}, {label: 'Hay mê', value: 'Hay mê'}, {label: 'Ngủ ít', value: 'Ngủ ít'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanNgu} onChange={(v) => handleChange('vanNgu', v)} />
+                            
+                            <div className="md:col-span-2">
+                                <h4 className="font-semibold text-emerald-900 mb-2">12. Khả năng sinh dục-sinh sản</h4>
+                                <CheckboxGroup label="12.1 Nam giới" options={[{label: 'Liệt dương', value: 'Liệt dương'}, {label: 'Di tinh', value: 'Di tinh'}, {label: 'Hoạt tinh', value: 'Hoạt tinh'}, {label: 'Mộng tinh', value: 'Mộng tinh'}, {label: 'Lãnh tinh', value: 'Lãnh tinh'}, {label: 'Mãn dục', value: 'Mãn dục'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanSinhDucNam} onChange={(v) => handleChange('vanSinhDucNam', v)} />
+                                
+                                <CheckboxGroup label="12.2 Nữ giới" options={[{label: 'Vô sinh', value: 'Vô sinh'}, {label: 'Động thai', value: 'Động thai'}, {label: 'Sảy thai', value: 'Sảy thai'}, {label: 'Sảy thai liên tiếp', value: 'Sảy thai liên tiếp'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanSinhDucNu} onChange={(v) => handleChange('vanSinhDucNu', v)} />
+                                <CheckboxGroup label="- Rối loạn kinh nguyệt" options={[{label: 'Trước kỳ', value: 'Trước kỳ'}, {label: 'Sau kỳ', value: 'Sau kỳ'}, {label: 'Bế kinh', value: 'Bế kinh'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanKinhNguyet} onChange={(v) => handleChange('vanKinhNguyet', v)} />
+                                <CheckboxGroup label="- Thống kinh" options={[{label: 'Trước kỳ', value: 'Trước kỳ'}, {label: 'Trong kỳ', value: 'Trong kỳ'}, {label: 'Sau kỳ', value: 'Sau kỳ'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanThongKinh} onChange={(v) => handleChange('vanThongKinh', v)} />
+                                <CheckboxGroup label="- Đới hạ" options={[{label: 'Vàng', value: 'Vàng'}, {label: 'Trắng', value: 'Trắng'}, {label: 'Hồng', value: 'Hồng'}, {label: 'Hôi', value: 'Hôi'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.vanDoiHa} onChange={(v) => handleChange('vanDoiHa', v)} />
+                            </div>
+
+                            <CheckboxGroup label="13. Các yếu tố liên quan đến xuất hiện bệnh" options={[{label: 'Có', value: 'Có'}, {label: 'Không', value: 'Không'}]} selectedValues={record.vanYeuToLienQuan} onChange={(v) => handleChange('vanYeuToLienQuan', v)} />
+                            <div className="md:col-span-2">
+                                <TextArea label="14. Mô tả khác (Vấn chẩn)" value={record.vanDapMoTaKhac} onChange={(e) => handleChange('vanDapMoTaKhac', e.target.value)} rows={2} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                    <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">IV. Thiết Chẩn (Bắt mạch, sờ nắn)</h3>
+                    
+                    <h4 className="font-semibold text-emerald-900 mb-2">1. Xúc chẩn</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-orange-50 p-4 rounded-md border border-orange-100 mb-6">
+                        <CheckboxGroup label="- Da" options={[{label: 'Khô', value: 'Khô'}, {label: 'Nóng', value: 'Nóng'}, {label: 'Lạnh', value: 'Lạnh'}, {label: 'Ướt', value: 'Ướt'}, {label: 'Chân tay nóng', value: 'Chân tay nóng'}, {label: 'Chân tay lạnh', value: 'Chân tay lạnh'}, {label: 'Ấn lõm', value: 'Ấn lõm'}, {label: 'Ấn đau', value: 'Ấn đau'}, {label: 'U/Cục', value: 'U/Cục'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.thietDa} onChange={(v) => handleChange('thietDa', v)} />
+                        <CheckboxGroup label="- Cơ - xương - khớp" options={[{label: 'Mềm nhẽo', value: 'Mềm nhẽo'}, {label: 'Căng cứng', value: 'Căng cứng'}, {label: 'Ấn đau', value: 'Ấn đau'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.thietCoXuongKhop} onChange={(v) => handleChange('thietCoXuongKhop', v)} />
+                        <CheckboxGroup label="- Bụng" options={[{label: 'Chướng', value: 'Chướng'}, {label: 'Tích', value: 'Tích'}, {label: 'Tụ', value: 'Tụ'}, {label: 'Thiện án', value: 'Thiện án'}, {label: 'Cự án', value: 'Cự án'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.thietBung} onChange={(v) => handleChange('thietBung', v)} />
+                        <CheckboxGroup label="- Mồ hôi" options={[{label: 'Toàn thân', value: 'Toàn thân'}, {label: 'Trán', value: 'Trán'}, {label: 'Tay', value: 'Tay'}, {label: 'Chân', value: 'Chân'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.thietMoHoi} onChange={(v) => handleChange('thietMoHoi', v)} />
+                    </div>
+
+                    <h4 className="font-semibold text-emerald-900 mb-2">2. Mạch chẩn</h4>
+                    <div className="bg-orange-50 p-4 rounded-md border border-orange-100">
+                        <CheckboxGroup label="Mạch" options={[{label: 'Trầm', value: 'Trầm'}, {label: 'Trì', value: 'Trì'}, {label: 'Phù', value: 'Phù'}, {label: 'Sác', value: 'Sác'}, {label: 'Hoạt', value: 'Hoạt'}, {label: 'Huyền', value: 'Huyền'}, {label: 'Nhu', value: 'Nhu'}, {label: 'Khác', value: 'Khác'}]} selectedValues={record.machChan} onChange={(v) => handleChange('machChan', v)} />
+                        
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-sm font-semibold text-slate-800 block mb-2">- Tổng khán</label>
+                                <Input label="Bên phải (Khí, dương)" value={record.machTongKhanPhai} onChange={(e) => handleChange('machTongKhanPhai', e.target.value)} className="mb-2" />
+                                <Input label="Bên trái (Huyết, âm)" value={record.machTongKhanTrai} onChange={(e) => handleChange('machTongKhanTrai', e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="text-sm font-semibold text-slate-800 block mb-2">- Vi khán (Mạch tay trái)</label>
+                                <div className="grid grid-cols-3 gap-2 mb-4">
+                                    <Input placeholder="Thốn" value={record.machTraiThon} onChange={(e) => handleChange('machTraiThon', e.target.value)} />
+                                    <Input placeholder="Quan" value={record.machTraiQuan} onChange={(e) => handleChange('machTraiQuan', e.target.value)} />
+                                    <Input placeholder="Xích" value={record.machTraiXich} onChange={(e) => handleChange('machTraiXich', e.target.value)} />
+                                </div>
+                                <label className="text-sm font-semibold text-slate-800 block mb-2">- Vi khán (Mạch tay phải)</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <Input placeholder="Thốn" value={record.machPhaiThon} onChange={(e) => handleChange('machPhaiThon', e.target.value)} />
+                                    <Input placeholder="Quan" value={record.machPhaiQuan} onChange={(e) => handleChange('machPhaiQuan', e.target.value)} />
+                                    <Input placeholder="Xích" value={record.machPhaiXich} onChange={(e) => handleChange('machPhaiXich', e.target.value)} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <TextArea label="3. Mô tả khác (Thiết chẩn)" value={record.thietMoTaKhac} onChange={(e) => handleChange('thietMoTaKhac', e.target.value)} rows={2} className="mt-4" />
+                </div>
+                </div>
+            );
+
+            const renderCĐ_ĐT_YHCT = () => {
+                const handlePrescriptionSelect = (selected) => {
+                    if (selected) {
+                        setRecord(prev => ({
+                        ...prev,
+                        phapDieuTri: selected.phapTri,
+                        phuongDuoc: selected.name + '\n' + selected.congThuc,
+                        phuongPhapKhac: selected.thuThuat ? selected.thuThuat : prev.phuongPhapKhac
+                        }));
+                    }
+                };
+
+                const handleYHCTDiseaseSelect = (selected) => {
+                    handleChange('cdYhctBenhChinh', selected.label || selected);
+                };
+
+                return (
+                    <div className="space-y-6 animate-fadeIn">
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                        <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">Tóm tắt tứ chẩn & Biện chứng luận trị</h3>
+                        <div className="space-y-4">
+                            <TextArea label="Tóm tắt tứ chẩn" value={record.tomTatTuChan} onChange={(e) => handleChange('tomTatTuChan', e.target.value)} rows={4} placeholder="Tóm tắt các triệu chứng qua Vọng, Văn, Vấn, Thiết..." />
+                            <TextArea label="Biện chứng luận trị" value={record.bienChungLuanTri} onChange={(e) => handleChange('bienChungLuanTri', e.target.value)} rows={4} placeholder="Lý luận để đưa ra chẩn đoán và phương pháp điều trị..." />
+                        </div>
+                        </div>
+
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                        <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">Chẩn Đoán Y Học Cổ Truyền</h3>
+                        
+                        <div className="space-y-4">
+                            <div className="border border-emerald-300 rounded-md overflow-hidden bg-white shadow-sm focus-within:ring-2 focus-within:ring-emerald-500 transition-shadow">
+                            <div className="bg-emerald-50 border-b border-emerald-200 p-3">
+                                <h4 className="text-sm font-bold text-emerald-900 mb-2">Bệnh danh YHCT (Bệnh chính) - Điền nhanh:</h4>
+                                <AutocompleteSearch
+                                placeholder="Tra cứu Bệnh danh (Ví dụ: Yêu thống, Khái thấu, Vị quản thống...)"
+                                data={BENH_DANH_YHCT_PRESETS}
+                                onSelect={handleYHCTDiseaseSelect}
+                                iconName="Search"
+                                />
+                            </div>
+                            <div className="p-3">
+                                <textarea
+                                value={record.cdYhctBenhChinh}
+                                onChange={(e) => handleChange('cdYhctBenhChinh', e.target.value)}
+                                rows={2}
+                                placeholder="Gõ trực tiếp hoặc sử dụng thanh tìm kiếm phía trên..."
+                                className="w-full text-sm focus:outline-none resize-y"
+                                />
+                            </div>
+                            </div>
+
+                            <TextArea label="Bệnh kèm theo (YHCT)" value={record.cdYhctBenhKem} onChange={(e) => handleChange('cdYhctBenhKem', e.target.value)} rows={2} />
+                            
+                            <div className="bg-slate-50 p-3 rounded border border-slate-200 mt-2">
+                            <CheckboxGroup label="Bát cương" options={[{label: 'Biểu', value: 'Biểu'}, {label: 'Lý', value: 'Lý'}, {label: 'Hư', value: 'Hư'}, {label: 'Thực', value: 'Thực'}, {label: 'Hàn', value: 'Hàn'}, {label: 'Nhiệt', value: 'Nhiệt'}, {label: 'Âm', value: 'Âm'}, {label: 'Dương', value: 'Dương'}]} selectedValues={record.batCuong} onChange={(v) => handleChange('batCuong', v)} />
+                            <CheckboxGroup label="Tạng phủ" options={[{label: 'Tâm', value: 'Tâm'}, {label: 'Can', value: 'Can'}, {label: 'Tỳ', value: 'Tỳ'}, {label: 'Phế', value: 'Phế'}, {label: 'Thận', value: 'Thận'}]} selectedValues={record.tangPhu} onChange={(v) => handleChange('tangPhu', v)} />
+                            <CheckboxGroup label="Nguyên nhân" options={[{label: 'Nội nhân', value: 'Nội nhân'}, {label: 'Ngoại nhân', value: 'Ngoại nhân'}, {label: 'Bất nội ngoại nhân', value: 'Bất nội ngoại nhân'}]} selectedValues={record.nguyenNhan} onChange={(v) => handleChange('nguyenNhan', v)} />
+                            </div>
+                        </div>
+                        </div>
+
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                        <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">Điều Trị Y Học Cổ Truyền</h3>
+                        <div className="space-y-4">
+                            <Input label="Pháp điều trị" value={record.phapDieuTri} onChange={(e) => handleChange('phapDieuTri', e.target.value)} placeholder="Vd: Hành khí hoạt huyết, khu phong tán hàn..." />
+                            
+                            <div className="border border-emerald-300 rounded-md overflow-hidden bg-white shadow-sm focus-within:ring-2 focus-within:ring-emerald-500 transition-shadow">
+                            <div className="bg-emerald-50 border-b border-emerald-200 p-3">
+                                <div className="flex justify-between items-center mb-2">
+                                    <h4 className="text-sm font-bold text-emerald-900">Phương dược (Tích hợp thư viện & Cá nhân):</h4>
+                                    <button 
+                                        onClick={() => setIsCustomRemedyModalOpen(true)}
+                                        className="flex items-center px-2 py-1 bg-emerald-200 text-emerald-800 hover:bg-emerald-300 border border-emerald-300 rounded text-xs font-medium transition-colors"
+                                    >
+                                        <Icon name="Plus" size={14} className="mr-1"/> Tủ thuốc cá nhân
+                                    </button>
+                                </div>
+                                <AutocompleteSearch
+                                placeholder="Tra cứu bài thuốc hoặc thể bệnh..."
+                                data={[...BAI_THUOC_CO_PHUONG, ...customRemedies]}
+                                onSelect={handlePrescriptionSelect}
+                                iconName="Search"
+                                />
+                            </div>
+                            <div className="p-3">
+                                <textarea
+                                value={record.phuongDuoc}
+                                onChange={(e) => handleChange('phuongDuoc', e.target.value)}
+                                rows={6}
+                                placeholder="Gõ trực tiếp hoặc sử dụng thanh tìm kiếm phía trên để tự tự động điền Pháp trị, Phương dược và Phương pháp khác..."
+                                className="w-full text-sm focus:outline-none resize-y"
+                                />
+                            </div>
+                            </div>
+
+                            <TextArea label="Phương pháp điều trị không dùng thuốc (Châm cứu, xoa bóp...)" value={record.phuongPhapKhac} onChange={(e) => handleChange('phuongPhapKhac', e.target.value)} rows={3} placeholder="Ví dụ: Điện châm các huyệt Giáp tích L3-L5, Đại trường du..." />
+                        </div>
+                        </div>
+
+                        <div className="bg-white p-5 rounded-lg shadow-sm border border-emerald-200">
+                        <h3 className="text-lg font-bold text-emerald-800 mb-4 border-b border-emerald-100 pb-2">Tiên lượng & Dự hậu</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <TextArea label="Tiên lượng" value={record.tienLuongYhct || ''} onChange={(e) => handleChange('tienLuongYhct', e.target.value)} rows={3} placeholder="Tiên lượng khả năng phục hồi theo YHCT..." />
+                            <TextArea label="Dự hậu" value={record.duHauYhct || ''} onChange={(e) => handleChange('duHauYhct', e.target.value)} rows={3} placeholder="Lời khuyên dưỡng sinh, ăn uống, kiêng kỵ..." />
+                        </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const tabs = [
+                { id: 'hanhChinh', label: '1. Hành chính', iconName: 'User' },
+                { id: 'khamBenh', label: '2. Khám YHHĐ', iconName: 'Activity' },
+                { id: 'clsYhhd', label: '3. CLS & ĐT YHHĐ', iconName: 'Pill' },
+                { id: 'khamYhct', label: '4. Khám YHCT', iconName: 'Leaf' },
+                { id: 'cdDtYhct', label: '5. CĐ & ĐT YHCT', iconName: 'Stethoscope' },
+            ];
+
+            return (
+                <div className="min-h-screen font-sans">
+                    {/* KHU VỰC ỨNG DỤNG LÀM VIỆC (SẼ ẨN KHI IN) */}
+                    <div className="print-hidden pb-20">
+                        <div className="bg-white shadow-md sticky top-0 z-20 border-b border-emerald-600">
+                            <div className="max-w-6xl mx-auto px-4">
+                                <div className="flex items-center justify-between py-3">
+                                    <div className="flex items-center space-x-3">
+                                        <div className="bg-emerald-600 text-white p-2 rounded-lg"><Icon name="Leaf" size={24} /></div>
+                                        <h1 className="text-xl font-bold text-emerald-800 uppercase tracking-wide hidden sm:block">Bệnh Án Điện Tử YHCT</h1>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 justify-end relative">
+                                        
+                                        {/* Nút Danh sách */}
+                                        <div ref={listMenuRef} className="relative">
+                                            <button onClick={() => setIsListMenuOpen(!isListMenuOpen)} className="flex items-center px-3 py-2 bg-amber-50 text-amber-700 rounded-md hover:bg-amber-100 transition shadow-sm font-medium text-sm">
+                                                <Icon name="List" size={16} className="mr-1 md:mr-2"/> <span className="hidden md:inline">Danh sách</span> ({savedRecords.length})
+                                            </button>
+                                            {isListMenuOpen && (
+                                                <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-md shadow-lg z-50 overflow-hidden max-h-96 overflow-y-auto">
+                                                    {savedRecords.length === 0 ? (
+                                                        <div className="p-4 text-center text-sm text-slate-500">Chưa có bệnh án lưu tạm</div>
+                                                    ) : (
+                                                        <>
+                                                            {savedRecords.map(rec => (
+                                                                <div key={rec.id} className="p-3 border-b border-slate-100 hover:bg-slate-50 cursor-pointer flex justify-between items-center">
+                                                                    <div className="flex-1" onClick={() => handleEditRecord(rec)}>
+                                                                        <div className="font-semibold text-sm text-slate-800">{rec.hoTen || 'Chưa có tên'}</div>
+                                                                        <div className="text-xs text-slate-500 mt-1">{rec.updatedAt}</div>
+                                                                    </div>
+                                                                    <div className="flex space-x-1 ml-2">
+                                                                        <button onClick={() => handleEditRecord(rec)} className="text-blue-600 hover:bg-blue-50 px-2 py-1.5 rounded transition-colors text-xs font-medium border border-blue-200" title="Mở bệnh án này">
+                                                                            Mở
+                                                                        </button>
+                                                                        <button onClick={(e) => confirmDeleteRecord(e, rec.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded transition-colors border border-red-200" title="Xóa">
+                                                                            <Icon name="Trash2" size={14} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                            
+                                                            {/* Nút Khôi phục nằm dưới cùng danh sách */}
+                                                            <div className="p-3 bg-red-50 border-t border-red-100 mt-2">
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        setModalConfig({
+                                                                            isOpen: true,
+                                                                            title: 'Dọn dẹp bộ nhớ',
+                                                                            message: 'CẢNH BÁO: Thao tác này sẽ XÓA TOÀN BỘ bệnh án đang lưu trong danh sách để dọn dẹp. Bạn có chắc chắn không?',
+                                                                            onConfirm: () => {
+                                                                                try { localStorage.removeItem('yhct_records'); } catch(e){}
+                                                                                setSavedRecords([]);
+                                                                                setRecord(initialRecordState);
+                                                                                setCurrentRecordId(null);
+                                                                                setIsListMenuOpen(false);
+                                                                            }
+                                                                        });
+                                                                    }} 
+                                                                    className="w-full py-2 flex items-center justify-center bg-red-100 text-red-600 rounded hover:bg-red-200 transition-colors text-xs font-bold border border-red-200"
+                                                                >
+                                                                    <Icon name="Trash2" size={14} className="mr-1" /> Xóa tất cả dữ liệu (Dọn rác)
+                                                                </button>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Nút Làm mới */}
+                                        <button onClick={handleNewRecord} className="flex items-center px-3 py-2 bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200 transition shadow-sm font-medium text-sm">
+                                            <Icon name="RefreshCw" size={16} className="mr-1 md:mr-2"/> <span className="hidden md:inline">Làm mới</span>
+                                        </button>
+
+                                        {/* Nút Lưu Tạm */}
+                                        <button onClick={handleSaveDraft} className="flex items-center px-3 py-2 bg-indigo-50 text-indigo-700 rounded-md hover:bg-indigo-100 transition shadow-sm font-medium text-sm">
+                                            <Icon name="Archive" size={16} className="mr-1 md:mr-2"/> <span className="hidden md:inline">Lưu tạm</span>
+                                        </button>
+
+                                        {/* Nút In */}
+                                        <button onClick={handlePrint} className="flex items-center px-3 py-2 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition shadow-sm font-medium text-sm">
+                                            <Icon name="Printer" size={16} className="mr-1 md:mr-2"/> <span className="hidden lg:inline">In BA</span>
+                                        </button>
+                                        
+                                        {/* Nút & Menu Lưu */}
+                                        <div ref={saveMenuRef} className="relative">
+                                            <button 
+                                                onClick={() => setIsSaveMenuOpen(!isSaveMenuOpen)} 
+                                                disabled={isExportingPDF}
+                                                className="flex items-center px-3 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition shadow-sm font-medium text-sm disabled:opacity-75 disabled:cursor-wait"
+                                            >
+                                                <Icon name="Save" size={16} className="mr-1 md:mr-2"/> 
+                                                <span className="hidden md:inline">{isExportingPDF ? 'Đang xuất...' : 'Xuất File'}</span>
+                                                {!isExportingPDF && <Icon name="ChevronDown" size={16} className="ml-1"/>}
+                                            </button>
+                                            
+                                            {isSaveMenuOpen && !isExportingPDF && (
+                                                <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-md shadow-lg z-50 overflow-hidden">
+                                                    <button onClick={exportToWord} className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 hover:text-blue-600 flex items-center border-b border-slate-100">
+                                                        <Icon name="FileText" size={16} className="mr-2" /> Tải về dạng Word (.doc)
+                                                    </button>
+                                                    <button onClick={exportToPDF} className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 hover:text-red-600 flex items-center">
+                                                        <Icon name="FileText" size={16} className="mr-2" /> Tải về dạng PDF (.pdf)
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex overflow-x-auto hide-scrollbar border-t border-slate-100">
+                                    {tabs.map(tab => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`flex items-center px-5 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                                            activeTab === tab.id ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50' : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <Icon name={tab.iconName} size={18} className="mr-2"/>
+                                        {tab.label}
+                                    </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="max-w-6xl mx-auto p-4 md:p-6">
+                            {activeTab === 'hanhChinh' && renderHanhChinh()}
+                            {activeTab === 'khamBenh' && renderKhamBenh()}
+                            {activeTab === 'clsYhhd' && renderCLS_YHHĐ()}
+                            {activeTab === 'khamYhct' && renderKhamYHCT()}
+                            {activeTab === 'cdDtYhct' && renderCĐ_ĐT_YHCT()}
+                        </div>
+                    </div>
+
+                    {/* KHU VỰC ẨN ĐỂ IN VÀ XUẤT FILE (RENDER TOÀN BỘ) */}
+                    <PrintableView record={record} />
+
+                    {/* HIỂN THỊ THÔNG BÁO (TOAST) */}
+                    {toastMessage && (
+                        <div className="fixed bottom-4 right-4 z-[100] bg-emerald-600 text-white px-4 py-3 rounded shadow-lg flex items-center animate-fadeIn text-sm font-medium">
+                            <Icon name="Check" size={18} className="mr-2"/> {toastMessage}
+                        </div>
+                    )}
+
+                    {/* HIỂN THỊ HỘP THOẠI XÁC NHẬN (MODAL) */}
+                    {modalConfig.isOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
+                            <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl animate-fadeIn">
+                                <h3 className="text-lg font-bold text-slate-800 mb-2">{modalConfig.title}</h3>
+                                <p className="text-sm text-slate-600 mb-6">{modalConfig.message}</p>
+                                <div className="flex justify-end space-x-3">
+                                    <button onClick={() => setModalConfig({ ...modalConfig, isOpen: false })} className="px-4 py-2 bg-slate-100 text-slate-700 rounded hover:bg-slate-200 text-sm font-medium transition-colors">Hủy</button>
+                                    <button onClick={() => { modalConfig.onConfirm(); setModalConfig({ ...modalConfig, isOpen: false }); }} className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-medium transition-colors">Đồng ý</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL TỦ THUỐC CÁ NHÂN */}
+                    {isCustomRemedyModalOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
+                            <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl animate-fadeIn max-h-[90vh] flex flex-col">
+                                <div className="flex justify-between items-center mb-4 border-b pb-2">
+                                    <h3 className="text-lg font-bold text-emerald-800 flex items-center"><Icon name="Archive" size={20} className="mr-2" /> Tủ Thuốc Cá Nhân</h3>
+                                    <button onClick={() => setIsCustomRemedyModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                        <Icon name="Plus" size={24} className="transform rotate-45" />
+                                    </button>
+                                </div>
+                                
+                                <div className="overflow-y-auto flex-1 pr-1 space-y-4 hide-scrollbar">
+                                    <div className="bg-emerald-50 p-4 rounded-md border border-emerald-100 space-y-3">
+                                        <h4 className="text-sm font-bold text-emerald-900">Thêm bài thuốc mới</h4>
+                                        <Input label="Tên bài thuốc (*)" value={newRemedy.name} onChange={e => setNewRemedy({...newRemedy, name: e.target.value})} placeholder="Vd: Bài thuốc gia truyền..." />
+                                        <Input label="Pháp trị" value={newRemedy.phapTri} onChange={e => setNewRemedy({...newRemedy, phapTri: e.target.value})} placeholder="Vd: Khu phong, tán hàn..." />
+                                        <TextArea label="Phương dược / Công thức (*)" value={newRemedy.congThuc} onChange={e => setNewRemedy({...newRemedy, congThuc: e.target.value})} rows={3} placeholder="Chi tiết các vị thuốc..." />
+                                        <TextArea label="Phương pháp khác (Châm cứu, xoa bóp...)" value={newRemedy.thuThuat} onChange={e => setNewRemedy({...newRemedy, thuThuat: e.target.value})} rows={2} />
+                                        
+                                        <div className="flex justify-end mt-2">
+                                            <button onClick={() => {
+                                                if (!newRemedy.name || !newRemedy.congThuc) {
+                                                    setToastMessage('Vui lòng nhập Tên bài thuốc và Công thức!');
+                                                    setTimeout(() => setToastMessage(''), 3000);
+                                                    return;
+                                                }
+                                                const remedyToAdd = {
+                                                    label: `[Cá nhân] ${newRemedy.name}`,
+                                                    name: newRemedy.name,
+                                                    phapTri: newRemedy.phapTri,
+                                                    congThuc: newRemedy.congThuc,
+                                                    thuThuat: newRemedy.thuThuat
+                                                };
+                                                setCustomRemedies([...customRemedies, remedyToAdd]);
+                                                setNewRemedy({ name: '', phapTri: '', congThuc: '', thuThuat: '' });
+                                                setToastMessage('Đã thêm vào Tủ thuốc cá nhân!');
+                                                setTimeout(() => setToastMessage(''), 3000);
+                                            }} className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-medium transition-colors w-full">Lưu vào Tủ Thuốc</button>
+                                        </div>
+                                    </div>
+
+                                    {customRemedies.length > 0 && (
+                                        <div className="mt-4">
+                                            <h4 className="text-sm font-semibold text-slate-700 mb-2">Danh sách bài thuốc cá nhân ({customRemedies.length}):</h4>
+                                            <ul className="space-y-2">
+                                                {customRemedies.map((r, idx) => (
+                                                    <li key={idx} className="flex justify-between items-center bg-white p-3 rounded-md text-sm border border-slate-200 shadow-sm">
+                                                        <div className="flex-1 min-w-0 pr-2">
+                                                            <div className="font-bold text-emerald-800 truncate">{r.name}</div>
+                                                            <div className="text-xs text-slate-500 line-clamp-2 mt-1 whitespace-pre-wrap">{r.congThuc}</div>
+                                                        </div>
+                                                        <button onClick={() => {
+                                                            setModalConfig({
+                                                                isOpen: true,
+                                                                title: 'Xóa Bài Thuốc Cá Nhân',
+                                                                message: `Bạn có chắc chắn muốn xóa bài thuốc "${r.name}" khỏi tủ thuốc cá nhân?`,
+                                                                onConfirm: () => {
+                                                                    setCustomRemedies(customRemedies.filter((_, i) => i !== idx));
+                                                                    setToastMessage('Đã xóa bài thuốc!');
+                                                                    setTimeout(() => setToastMessage(''), 3000);
+                                                                }
+                                                            });
+                                                        }} className="text-red-500 hover:text-red-700 flex-shrink-0 bg-red-50 p-1.5 rounded border border-red-100 transition-colors">
+                                                            <Icon name="Trash2" size={16} />
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(
+            <ErrorBoundary>
+                <App />
+            </ErrorBoundary>
+        );
+    </script>
+</body>
+</html>
